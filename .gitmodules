@@ -1,3 +1,6 @@
 [submodule "ThirdParty/Other/assimp"]
 	path = ThirdParty/Other/assimp
 	url = https://github.com/chichi-9527/assimp.git
+[submodule "ThirdParty/Other/freetype"]
+	path = ThirdParty/Other/freetype
+	url = https://github.com/chichi-9527/freetype.git
