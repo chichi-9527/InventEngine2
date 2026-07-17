@@ -7,3 +7,6 @@
 [submodule "ThirdParty/Other/glfw"]
 	path = ThirdParty/Other/glfw
 	url = https://github.com/chichi-9527/glfw.git
+[submodule "ThirdParty/Other/bullet3"]
+	path = ThirdParty/Other/bullet3
+	url = https://github.com/chichi-9527/bullet3.git
