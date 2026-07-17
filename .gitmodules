@@ -4,3 +4,6 @@
 [submodule "ThirdParty/Other/freetype"]
 	path = ThirdParty/Other/freetype
 	url = https://github.com/chichi-9527/freetype.git
+[submodule "ThirdParty/Other/glfw"]
+	path = ThirdParty/Other/glfw
+	url = https://github.com/chichi-9527/glfw.git
