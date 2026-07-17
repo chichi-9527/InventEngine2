@@ -48,8 +48,19 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 
+# bullet3
+set(BUILD_BULLET3 OFF CACHE BOOL "Only build bullet2 core libs" FORCE) # 引擎底層通常使用相容性更好的 bullet2 核心
+set(BUILD_DEMOS OFF CACHE BOOL "No  demos" FORCE)                       #关闭展示程式
+set(BUILD_EXTRAS OFF CACHE BOOL "No extras" FORCE)                     # 關閉額外插件
+set(BUILD_UNIT_TESTS OFF CACHE BOOL "No tests" FORCE)                 # 關閉單元測試
+set(INSTALL_LIBS OFF CACHE BOOL "No install" FORCE)                   # 關閉安裝指令
+set(USE_MSVC_RUNTIME_LIBRARY_DLL ON CACHE BOOL "Force /MD" FORCE)      # 強制 Bullet 使用 /MD，與引擎對齊
+set(BUILD_CPU_DEMOS OFF CACHE BOOL "Disable CPU Demos" FORCE)
+set(BUILD_BULLET2_DEMOS OFF CACHE BOOL "Disable Bullet2 Demos" FORCE)
+
 
 # 子项目
+add_subdirectory(ThirdParty/Other/bullet3)
 add_subdirectory(ThirdParty/Other/assimp)
 add_subdirectory(ThirdParty/Other/freetype)
 add_subdirectory(ThirdParty/Other/glfw)

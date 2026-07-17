@@ -28,12 +28,14 @@ target_compile_definitions(Engine
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
 set(ONE_HEANER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/OneHeader")
+set(BULLET3_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/bullet3/src")
 
 target_include_directories(Engine 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/Public  # 公共头文件目录
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/Private # 私有头文件目录
     PRIVATE ${SDK_DIR}/include # sdk 头文件目录
     PRIVATE ${ONE_HEANER_DIR} # 一头文件目录
+    PRIVATE ${BULLET3_SRC_DIR} # bullet3 源文件目录
 )
 
 target_link_libraries(Engine 
@@ -42,4 +44,9 @@ target_link_libraries(Engine
     PRIVATE freetype
     PRIVATE glfw
     PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
+
+    # bullet3
+    PRIVATE BulletDynamics
+    PRIVATE BulletCollision
+    PRIVATE LinearMath
 )
