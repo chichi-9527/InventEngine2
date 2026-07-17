@@ -1,0 +1,28 @@
+
+file(GLOB_RECURSE SLANG_SRCS "src/*.cpp")
+file(GLOB_RECURSE SLANG_INCS "include/*.h" "include/*.hpp")
+
+set(SLANG_ALL_FILES ${SLANG_SRCS} ${SLANG_INCS})
+
+add_library(SlangCompiler STATIC ${SLANG_ALL_FILES})
+
+# 源文件分组
+foreach(FILE ${SLANG_ALL_FILES})
+    get_filename_component(FILE_DIR "${FILE}" DIRECTORY)
+    file(RELATIVE_PATH REL_DIR "${CMAKE_CURRENT_SOURCE_DIR}" "${FILE_DIR}")
+    string(REPLACE "/" "\\" REL_DIR "${REL_DIR}")
+    source_group("${REL_DIR}" FILES "${FILE}")
+endforeach()
+
+set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
+
+target_include_directories(SlangCompiler 
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE "${SDK_DIR}/include/slang"
+)
+
+target_link_libraries(SlangCompiler 
+    PRIVATE "${SDK_DIR}/lib/slang.lib"
+    PRIVATE "${SDK_DIR}/lib/slang-compiler.lib"
+    PRIVATE "${SDK_DIR}/lib/slang-rt.lib"
+)
