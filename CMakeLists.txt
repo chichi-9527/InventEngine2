@@ -2,6 +2,15 @@
 cmake_minimum_required(VERSION 3.20)
 project(InventEngine2)
 
+# 项目分组
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+macro(folder_organize target_name folder_path)
+    if(TARGET ${target_name})
+        set_target_properties(${target_name} PROPERTIES FOLDER "${folder_path}")
+    endif()
+endmacro()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -69,3 +78,17 @@ add_subdirectory(Engine)
 
 # 测试项目
 add_subdirectory(TestEngine)
+
+# 项目分组
+folder_organize(assimp "ThirdParty")
+folder_organize(zlibstatic "ThirdParty")
+folder_organize(freetype "ThirdParty")
+folder_organize(glfw "ThirdParty")
+folder_organize(Bullet3Common "ThirdParty/Bullet")
+folder_organize(BulletCollision "ThirdParty/Bullet")
+folder_organize(BulletDynamics "ThirdParty/Bullet")
+folder_organize(BulletInverseDynamics "ThirdParty/Bullet")
+folder_organize(BulletSoftBody "ThirdParty/Bullet")
+folder_organize(LinearMath "ThirdParty/Bullet")
+
+folder_organize(UpdateAssimpLibsDebugSymbolsAndDLLs "ThirdParty/Internal")
