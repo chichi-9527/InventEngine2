@@ -1,18 +1,26 @@
 ﻿
 
 #include "engine_test.h"
+#include "IText.h"
 
+#include <cstdint>
+#include <format>
 #include <iostream>
-
 
 
 int main()
 {
-    std::cout << "[Test] 啟動測試程序 (C++20)" << std::endl;
+    
 
     INVENT::TestClass test;
     test.Init();
+
+    std::string str("中文");
     
-    std::cout << "[Test] 測試程序順利結束！" << std::endl;
+    std::cout << str << "\n";
+    
+    std::cout << "[Test] 测试完成\n";
+    
+    getchar();
     return 0;
 }

@@ -6,6 +6,10 @@ set(SLANG_ALL_FILES ${SLANG_SRCS} ${SLANG_INCS})
 
 add_library(SlangCompiler STATIC ${SLANG_ALL_FILES})
 
+if (MSVC)
+    target_compile_options(SlangCompiler PRIVATE "/utf-8")
+endif()
+
 # 源文件分组
 foreach(FILE ${SLANG_ALL_FILES})
     get_filename_component(FILE_DIR "${FILE}" DIRECTORY)
@@ -13,6 +17,10 @@ foreach(FILE ${SLANG_ALL_FILES})
     string(REPLACE "/" "\\" REL_DIR "${REL_DIR}")
     source_group("${REL_DIR}" FILES "${FILE}")
 endforeach()
+
+target_compile_definitions(SlangCompiler 
+    PRIVATE SHOW_LOGS
+)
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
 

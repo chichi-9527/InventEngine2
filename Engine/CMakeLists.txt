@@ -1,4 +1,4 @@
-
+﻿
 
 file(GLOB_RECURSE ENGINE_SRCS "src/*.cpp")
 file(GLOB_RECURSE ENGINE_INCS 
@@ -12,7 +12,24 @@ file(GLOB_RECURSE ENGINE_INCS
 
 set(ENGINE_ALL_FILES ${ENGINE_SRCS} ${ENGINE_INCS})
 
-add_library(Engine SHARED ${ENGINE_ALL_FILES})
+add_library(Engine SHARED ${ENGINE_ALL_FILES}) 
+
+if (MSVC)
+    target_compile_options(Engine PUBLIC "/utf-8")
+endif()
+
+# 预编译头
+target_precompile_headers(Engine PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/Private/engine_pch.h"
+)
+
+set(EXCLUDE_PCH_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ILog.cpp"
+)
+
+set_source_files_properties(${EXCLUDE_PCH_FILES}
+    PROPERTIES SKIP_PRECOMPILE_HEADERS ON
+)
 
 # 源文件分组
 foreach(FILE ${ENGINE_ALL_FILES})

@@ -14,6 +14,11 @@ endmacro()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(MSVC)
+    add_compile_options(/Zc:__cplusplus)
+endif()
+
+
 # 不导出所有符号
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
 
