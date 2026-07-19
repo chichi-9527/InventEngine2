@@ -11,3 +11,6 @@
 	path = ThirdParty/Other/bullet3
 	url = https://github.com/chichi-9527/bullet3.git
 	ignore = all
+[submodule "ThirdParty/Other/yaml-cpp"]
+	path = ThirdParty/Other/yaml-cpp
+	url = https://github.com/chichi-9527/yaml-cpp.git
