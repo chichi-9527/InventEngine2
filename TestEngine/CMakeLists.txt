@@ -1,4 +1,4 @@
-
+﻿
 file(GLOB_RECURSE TEST_SRCS "src/Private/*.cpp")
 file(GLOB_RECURSE TEST_INCS "src/Public/*.h")
 

@@ -43,6 +43,9 @@ endif()
 # 第三方库
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
 
+# 強制關閉 CTest 的內置測試生成
+set(BUILD_TESTING OFF CACHE BOOL "Disable CTest" FORCE)
+
 # assimp
 set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
