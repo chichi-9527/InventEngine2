@@ -72,12 +72,18 @@ set(USE_MSVC_RUNTIME_LIBRARY_DLL ON CACHE BOOL "Force /MD" FORCE)      # 強制 
 set(BUILD_CPU_DEMOS OFF CACHE BOOL "Disable CPU Demos" FORCE)
 set(BUILD_BULLET2_DEMOS OFF CACHE BOOL "Disable Bullet2 Demos" FORCE)
 
+# yaml-cpp 配置
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "No tests" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "No tools" FORCE)
+set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "No contrib" FORCE)
+
 
 # 子项目
 add_subdirectory(ThirdParty/Other/bullet3)
 add_subdirectory(ThirdParty/Other/assimp)
 add_subdirectory(ThirdParty/Other/freetype)
 add_subdirectory(ThirdParty/Other/glfw)
+add_subdirectory(ThirdParty/Other/yaml-cpp)
 add_subdirectory(SlangCompiler)
 add_subdirectory(Engine)
 
@@ -95,5 +101,7 @@ folder_organize(BulletDynamics "ThirdParty/Bullet")
 folder_organize(BulletInverseDynamics "ThirdParty/Bullet")
 folder_organize(BulletSoftBody "ThirdParty/Bullet")
 folder_organize(LinearMath "ThirdParty/Bullet")
+folder_organize(yaml-cpp "ThirdParty")
 
+folder_organize(flags "ThirdParty/Internal")
 folder_organize(UpdateAssimpLibsDebugSymbolsAndDLLs "ThirdParty/Internal")
