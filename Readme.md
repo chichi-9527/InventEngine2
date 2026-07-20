@@ -12,11 +12,17 @@
     3. git submodule update --init --recursive
 
 ## 构建项目
-    1. 进入项目目录
-    2. mkdir build
-    3. cd build
-    4. cmake -G "Visual Studio 17 2022" -A x64 -T host=x64 ..
+    1. 进入项目目录 ./
+```bash
+    mkdir build
+    cd build
+    cmake -G "Visual Studio 17 2022" -A x64 -T host=x64 ..
+```
     5. 双击 build 文件夹中 InventEngine2.sln 文件,即可打开 Visual Studio 2022 中构建项目
+
+
+## 项目结构
+    待完善
 
 ## 如何添加新文件
 
@@ -27,3 +33,19 @@
     4. 即可在 Visual Studio 中看到新添加的文件
 ### 其他项目同理
 
+## 生成游戏项目
+    1. 进入项目目录 ./Templates
+    2. 执行 GenerateProject.ps1 脚本 ：
+
+```powershell
+    powershell -ExecutionPolicy Bypass -File .\GenerateProject.ps1 -ProjectName "yourGameName" -TargetDir "yourGameDir"
+```
+
+    3. 进入 yourGameDir 目录,即可看到新生成的游戏项目目录
+    4. 使用 cmake 配置项目：
+```bash
+    mkdir build
+    cd build
+    cmake -G "Visual Studio 17 2022" -A x64 -T host=x64 ..
+```
+    5. 双击 build 文件夹中 yourGameName.sln 文件,即可打开 Visual Studio 2022 中构建项目
