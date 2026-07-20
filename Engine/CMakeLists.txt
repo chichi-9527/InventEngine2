@@ -57,7 +57,6 @@ set(YAML_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yaml-cpp")
 target_include_directories(Engine 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/Public  # 公共头文件目录
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/Private # 私有头文件目录
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8
     PRIVATE ${SDK_DIR}/include # sdk 头文件目录
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
     PRIVATE ${ONE_HEANER_DIR} # 一头文件目录
@@ -70,7 +69,7 @@ target_link_libraries(Engine
     PRIVATE assimp
     PRIVATE freetype
     PRIVATE glfw
-    PRIVATE yaml-cpp # yaml-cpp 库
+    PRIVATE yaml-cpp
     PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
     PRIVATE ${LUA_DIR}/lib/lua54.lib
 
