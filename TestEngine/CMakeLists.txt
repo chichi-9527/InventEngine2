@@ -16,6 +16,8 @@ foreach(FILE ${TEST_ALL_FILES})
     source_group("${REL_DIR}" FILES "${FILE}")
 endforeach()
 
+set_target_properties(TestEngine PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 target_include_directories(TestEngine 
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Public
 )

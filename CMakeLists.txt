@@ -2,6 +2,18 @@
 cmake_minimum_required(VERSION 3.20)
 project(InventEngine2)
 
+if(WIN32)
+    set(ENGINE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    #添加环境变量
+    execute_process(
+        COMMAND cmd /c setx INVENT_ENGINE_DIR "${ENGINE_ROOT_DIR}"
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    message(STATUS "注册环境变量 : INVENT_ENGINE_DIR: ${ENGINE_ROOT_DIR}")
+endif()
+
+
 # 项目分组
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -31,11 +43,7 @@ if(MSVC)
         CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
     )
 
-    foreach(flag ${CompilerFlags})
-        if(${flag} MATCHES "/MT")
-            string(REGEX REPLACE "/MT" "/MD" ${flag} "${${flag}}")
-        endif()
-    endforeach()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 endif()
 
@@ -80,18 +88,30 @@ set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "No tests" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "No tools" FORCE)
 set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "No contrib" FORCE)
 
-
-# 子项目
+# 第三方库
 add_subdirectory(ThirdParty/Other/bullet3)
 add_subdirectory(ThirdParty/Other/assimp)
 add_subdirectory(ThirdParty/Other/freetype)
 add_subdirectory(ThirdParty/Other/glfw)
 add_subdirectory(ThirdParty/Other/yaml-cpp)
+
+set(CMAKE_DEBUG_POSTFIX           "_d")
+set(CMAKE_RELEASE_POSTFIX         "")
+set(CMAKE_RELWITHDEBINFO_POSTFIX  "_rd")
+set(CMAKE_MINSIZEREL_POSTFIX      "_ms")
+
+# 子项目
 add_subdirectory(SlangCompiler)
 add_subdirectory(Engine)
 
-# 测试项目
-add_subdirectory(TestEngine)
+# 编辑器项目
+add_subdirectory(EngineEditor)
+
+option(INVENT_ENGINE_TEST "Build test project" ON)
+if(INVENT_ENGINE_TEST)
+    # 测试项目
+    add_subdirectory(TestEngine)
+endif()
 
 # 项目分组
 folder_organize(assimp "ThirdParty")
@@ -108,3 +128,7 @@ folder_organize(yaml-cpp "ThirdParty")
 
 folder_organize(flags "ThirdParty/Internal")
 folder_organize(UpdateAssimpLibsDebugSymbolsAndDLLs "ThirdParty/Internal")
+
+if(INVENT_ENGINE_TEST)
+    folder_organize(TestEngine "InventTest")
+endif()
