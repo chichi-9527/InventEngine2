@@ -1,8 +1,12 @@
 ﻿
 file(GLOB_RECURSE EDITOR_SRCS "src/*.cpp")
 file(GLOB_RECURSE EDITOR_INCS "src/*.h")
+file(GLOB_RECURSE IMGUI_FILES
+    "Imgui_1_92_8/*.h"
+    "Imgui_1_92_8/*.cpp"
+)
 
-set(EDITOR_ALL ${EDITOR_SRCS} ${EDITOR_INCS})
+set(EDITOR_ALL ${EDITOR_SRCS} ${EDITOR_INCS} ${IMGUI_FILES})
 
 add_executable(EngineEditor ${EDITOR_ALL})
 
@@ -14,21 +18,33 @@ foreach(FILE ${EDITOR_ALL})
     source_group("${REL_DIR}" FILES "${FILE}")
 endforeach()
 
+set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
+
 target_include_directories(EngineEditor
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Public
+    PRIVATE ${SDK_DIR}/include # sdk 头文件目录
 )
 
 target_link_libraries(EngineEditor
     PRIVATE Engine
+    PRIVATE glfw
     PRIVATE yaml-cpp
+    PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
 )
 
 target_compile_definitions(EngineEditor
     PRIVATE SHOW_LOGS
-    PRIVATE "INVENT_EDITOR=1"
     PRIVATE "CURRENT_BUILD_CONFIG=\"$<CONFIG>\""
 )
+
+if(ENGINE_BUILD_EDITOR)
+    set_target_properties(EngineEditor PROPERTIES OUTPUT_NAME "EngineEditor")
+    target_compile_definitions(EngineEditor PRIVATE "INVENT_EDITOR=1")
+else()
+    set_target_properties(EngineEditor PROPERTIES OUTPUT_NAME "${GAME_NAME}")
+    target_compile_definitions(EngineEditor PRIVATE "INVENT_EDITOR=0")
+endif()
 
 set_target_properties(EngineEditor PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 

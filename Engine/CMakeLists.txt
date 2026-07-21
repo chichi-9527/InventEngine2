@@ -9,12 +9,8 @@ file(GLOB_RECURSE ENGINE_INCS
         "include/Private/*.hpp"
         "include/Private/*.ipp"
 )
-file(GLOB_RECURSE IMGUI_FILES
-    "Imgui_1_92_8/*.h"
-    "Imgui_1_92_8/*.cpp"
-)
 
-set(ENGINE_ALL_FILES ${ENGINE_SRCS} ${ENGINE_INCS} ${IMGUI_FILES})
+set(ENGINE_ALL_FILES ${ENGINE_SRCS} ${ENGINE_INCS})
 
 add_library(Engine SHARED ${ENGINE_ALL_FILES}) 
 
@@ -46,7 +42,11 @@ endforeach()
 
 target_compile_definitions(Engine 
     PRIVATE EXPORTING_ENGINE
+    PRIVATE SHOW_LOGS
 )
+if(ENGINE_DEVELOPMENT_MODE)
+        target_compile_definitions(Engine PRIVATE ENGINE_DEVELOPMENT_MODE)
+endif()
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
 set(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/Lua")
@@ -68,7 +68,6 @@ target_link_libraries(Engine
     PRIVATE SlangCompiler
     PRIVATE assimp
     PRIVATE freetype
-    PRIVATE glfw
     PRIVATE yaml-cpp
     PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
     PRIVATE ${LUA_DIR}/lib/lua54.lib

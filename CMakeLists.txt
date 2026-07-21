@@ -13,6 +13,9 @@ if(WIN32)
     message(STATUS "注册环境变量 : INVENT_ENGINE_DIR: ${ENGINE_ROOT_DIR}")
 endif()
 
+option(ENGINE_BUILD_EDITOR "Build the engine with editor functionality" ON)
+option(ENGINE_DEVELOPMENT_MODE "Build develop engine with open vulkan validation layer" ON)
+set(GAME_NAME "MyGame" CACHE STRING "The name of the output executable")
 
 # 项目分组
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
