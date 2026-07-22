@@ -57,6 +57,29 @@ extern "C"
 #endif // _cplusplus
 	INVENT_API void INVENT_DLL InventLogInit(const char* file_path, const char* file_name);
 	INVENT_API void INVENT_DLL InventLogInfo(const char* log);
+	INVENT_API void INVENT_DLL InventLogWarning(const char* log);
+	INVENT_API void INVENT_DLL InventLogDebug(const char* log);
+	INVENT_API void INVENT_DLL InventLogError(const char* log);
+	INVENT_API void INVENT_DLL InventLogTrace(const char* log);
+	INVENT_API void INVENT_DLL InventLogFatal(const char* log);
 #ifdef __cplusplus
 }
 #endif // _cplusplus
+
+
+#ifdef SHOW_LOGS
+#define INVENT_LOG_INFO(X)		INVENT::ILog::Info(X)
+#define INVENT_LOG_WARNING(X)	INVENT::ILog::Warning(X)
+#define INVENT_LOG_DEBUG(X)		INVENT::ILog::Debug(X)
+#define INVENT_LOG_ERROE(X)		INVENT::ILog::Error(X)
+#define INVENT_LOG_TRACE(X)		INVENT::ILog::Trace(X)
+#define INVENT_LOG_FATAL(X)		INVENT::ILog::Fatal(X)
+#else
+#define INVENT_LOG_INFO(X)
+#define INVENT_LOG_WARNING(X)
+#define INVENT_LOG_DEBUG(X)
+#define INVENT_LOG_ERROE(X)
+#define INVENT_LOG_TRACE(X)
+#define INVENT_LOG_FATAL(X)
+#endif // SHOW_LOGS
+

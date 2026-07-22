@@ -4,8 +4,9 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/Engine/include/Public",
-                "${workspaceFolder}/Engine/include/Private",
+                "${workspaceFolder}/Engine/include",
+                "${workspaceFolder}/Engine/Private",
+                "${workspaceFolder}/EngineEditor/src/Private",
                 "${workspaceFolder}/EngineEditor/src/Public",
                 "${workspaceFolder}/SlangCompiler/include",
                 "${workspaceFolder}/TestEngine/src/Public",

@@ -1,6 +1,7 @@
 ﻿
 #include <IGameModule.h>
 #include <ILog.h>
+#include <Test.h>
 
 #include <iostream>
 #include <fstream>
@@ -119,6 +120,9 @@ void UnloadGameModule()
 int main()
 {
     INVENT::ILog::Init();
+
+    //Test();
+
     LoadProjectRegistry();
     for (auto& p : g_RegisteredProjects)
     {
@@ -135,6 +139,8 @@ int main()
 
     UnloadGameModule();
 
+    Test();
 
+    getchar();
     return 0;
 }

@@ -10,6 +10,14 @@ set(EDITOR_ALL ${EDITOR_SRCS} ${EDITOR_INCS} ${IMGUI_FILES})
 
 add_executable(EngineEditor ${EDITOR_ALL})
 
+target_precompile_headers(EngineEditor PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Private/editor_pch.h"
+)
+
+set(EXCLUDE_PCH_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/*.cpp"
+)
+
 # 源文件分组
 foreach(FILE ${EDITOR_ALL})
     get_filename_component(FILE_DIR "${FILE}" DIRECTORY)
@@ -19,10 +27,13 @@ foreach(FILE ${EDITOR_ALL})
 endforeach()
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
+set(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/Lua")
 
 target_include_directories(EngineEditor
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Public
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Private
+    PRIVATE ${LUA_DIR}/include # lua 头文件目录
     PRIVATE ${SDK_DIR}/include # sdk 头文件目录
 )
 
@@ -31,6 +42,7 @@ target_link_libraries(EngineEditor
     PRIVATE glfw
     PRIVATE yaml-cpp
     PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
+    PRIVATE ${LUA_DIR}/lib/lua54.lib
 )
 
 target_compile_definitions(EngineEditor

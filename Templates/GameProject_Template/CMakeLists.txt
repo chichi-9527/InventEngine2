@@ -55,7 +55,7 @@ foreach(FILE ${GAME_ALL_FILES})
 endforeach()
 
 target_include_directories(${PROJECT_NAME}
-    PRIVATE "${INVENT_ENGINE_ROOT_DIR}/Engine/include/Public"
+    PRIVATE "${INVENT_ENGINE_ROOT_DIR}/Engine/include"
     PRIVATE "${INVENT_ENGINE_ROOT_DIR}/ThirdParty/SDK/Lua/include"
     PRIVATE "${INVENT_ENGINE_ROOT_DIR}/ThirdParty/OneHeaner"
     PRIVATE "${INVENT_ENGINE_ROOT_DIR}/ThirdParty/Other/yaml-cpp/include"

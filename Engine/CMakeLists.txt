@@ -2,12 +2,12 @@
 
 file(GLOB_RECURSE ENGINE_SRCS "src/*.cpp")
 file(GLOB_RECURSE ENGINE_INCS 
-        "include/Public/*.h" 
-        "include/Public/*.hpp"
-        "include/Public/*.ipp"
-        "include/Private/*.h"
-        "include/Private/*.hpp"
-        "include/Private/*.ipp"
+        "include/*.h" 
+        "include/*.hpp"
+        "include/*.ipp"
+        "Private/*.h"
+        "Private/*.hpp"
+        "Private/*.ipp"
 )
 
 set(ENGINE_ALL_FILES ${ENGINE_SRCS} ${ENGINE_INCS})
@@ -20,12 +20,11 @@ endif()
 
 # 预编译头
 target_precompile_headers(Engine PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/Private/engine_pch.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Private/engine_pch.h"
 )
 
 set(EXCLUDE_PCH_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ILog.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/*.cpp"
 )
 
 set_source_files_properties(${EXCLUDE_PCH_FILES}
@@ -55,8 +54,8 @@ set(BULLET3_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/bullet3/src
 set(YAML_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yaml-cpp")
 
 target_include_directories(Engine 
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/Public  # 公共头文件目录
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/Private # 私有头文件目录
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include  # 公共头文件目录
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Private # 私有头文件目录
     PRIVATE ${SDK_DIR}/include # sdk 头文件目录
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
     PRIVATE ${ONE_HEANER_DIR} # 一头文件目录

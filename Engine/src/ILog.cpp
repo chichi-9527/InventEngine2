@@ -240,5 +240,30 @@ void INVENT_DLL InventLogInit(const char* file_path, const char* file_name)
 
 void INVENT_DLL InventLogInfo(const char* log)
 {
-	
+	INVENT::ILog::Info(log);
+}
+
+void INVENT_DLL InventLogWarning(const char* log)
+{
+	INVENT::ILog::Warning(log);
+}
+
+void INVENT_DLL InventLogDebug(const char* log)
+{
+	INVENT::ILog::Debug(log);
+}
+
+void INVENT_DLL InventLogError(const char* log)
+{
+	INVENT::ILog::Error(log);
+}
+
+void INVENT_DLL InventLogTrace(const char* log)
+{
+	INVENT::ILog::Trace(log);
+}
+
+void INVENT_DLL InventLogFatal(const char* log)
+{
+	INVENT::ILog::Fatal(log);
 }

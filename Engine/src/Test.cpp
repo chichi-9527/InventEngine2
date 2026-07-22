@@ -9,7 +9,7 @@
 
 void INVENT_API Test()
 {
-    INVENT::ILog::Init();
+    //INVENT::ILog::Init();
 
     // 2. 測試 yaml-cpp 讀取設定檔 [INDEX_1.4.2]
     YAML::Node config = YAML::Load("{ engine: { name: InventEngine, version: 2.0 } }");
