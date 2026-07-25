@@ -14,3 +14,6 @@
 [submodule "ThirdParty/Other/yaml-cpp"]
 	path = ThirdParty/Other/yaml-cpp
 	url = https://github.com/chichi-9527/yaml-cpp.git
+[submodule "ThirdParty/Other/yoga"]
+	path = ThirdParty/Other/yoga
+	url = https://github.com/chichi-9527/yoga.git
