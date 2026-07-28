@@ -10,7 +10,7 @@ if(WIN32)
         OUTPUT_QUIET
         ERROR_QUIET
     )
-    message(STATUS "注册环境变量 : INVENT_ENGINE_DIR: ${ENGINE_ROOT_DIR}")
+    message(STATUS "Register environment variables : INVENT_ENGINE_DIR: ${ENGINE_ROOT_DIR}")
 endif()
 
 option(ENGINE_BUILD_EDITOR "Build the engine with editor functionality" ON)
@@ -38,7 +38,7 @@ endif()
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
 
 if(MSVC)
-    add_compile_options(/MP)
+    add_compile_options(/MP /W3)# 使用標準警告級別
 
     # 替换所有 /MT 为 /MD
     set(CompilerFlags
@@ -91,12 +91,17 @@ set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "No tests" FORCE)
 set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "No tools" FORCE)
 set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "No contrib" FORCE)
 
+# yoga 配置
+set(YOGA_BUILD_TESTS OFF CACHE BOOL "No tests" FORCE)
+set(YOGA_BUILD_EXAMPLES OFF CACHE BOOL "No examples" FORCE)
+
 # 第三方库
 add_subdirectory(ThirdParty/Other/bullet3)
 add_subdirectory(ThirdParty/Other/assimp)
 add_subdirectory(ThirdParty/Other/freetype)
 add_subdirectory(ThirdParty/Other/glfw)
 add_subdirectory(ThirdParty/Other/yaml-cpp)
+add_subdirectory(ThirdParty/Other/yoga)
 
 set(CMAKE_DEBUG_POSTFIX           "_d")
 set(CMAKE_RELEASE_POSTFIX         "")
@@ -128,6 +133,7 @@ folder_organize(BulletInverseDynamics "ThirdParty/Bullet")
 folder_organize(BulletSoftBody "ThirdParty/Bullet")
 folder_organize(LinearMath "ThirdParty/Bullet")
 folder_organize(yaml-cpp "ThirdParty")
+folder_organize(yogacore "ThirdParty")
 
 folder_organize(flags "ThirdParty/Internal")
 folder_organize(UpdateAssimpLibsDebugSymbolsAndDLLs "ThirdParty/Internal")

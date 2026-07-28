@@ -14,8 +14,12 @@ target_precompile_headers(EngineEditor PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Private/editor_pch.h"
 )
 
-set(EXCLUDE_PCH_FILES
+file(GLOB_RECURSE EXCLUDE_PCH_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/*.cpp"
+)
+
+set_source_files_properties(${EXCLUDE_PCH_FILES} PROPERTIES
+    SKIP_PRECOMPILE_HEADER ON
 )
 
 # 源文件分组
@@ -70,10 +74,27 @@ add_custom_command(TARGET EngineEditor POST_BUILD
     $<TARGET_FILE_DIR:EngineEditor>
 )
 
-add_custom_command(TARGET EngineEditor POST_BUILD
-    # copy dll files to EngineEditor directory
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${SDK_DIR_BIN}"
-    $<TARGET_FILE_DIR:EngineEditor>
-)
+if(ENGINE_BUILD_EDITOR)
+    add_custom_command(TARGET EngineEditor POST_BUILD
+        # copy dll files to EngineEditor directory
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${SDK_DIR_BIN}"
+        $<TARGET_FILE_DIR:EngineEditor>
 
+        # copy config files to EngineEditor directory
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../Config"
+        "$<TARGET_FILE_DIR:EngineEditor>/Config"
+    )
+else()
+    add_custom_command(TARGET EngineEditor POST_BUILD
+        # copy dll files to EngineEditor directory
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${SDK_DIR_BIN}"
+        $<TARGET_FILE_DIR:EngineEditor>
+
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../Config/GameConfig"
+        "$<TARGET_FILE_DIR:EngineEditor>/Config/GameConfig"
+    )
+endif()

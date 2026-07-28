@@ -5,6 +5,7 @@
 
 #include <yaml-cpp/yaml.h>
 #include <sol/sol.hpp> 
+#include <yoga/Yoga.h>
 #include <iostream>
 
 void INVENT_API Test()
@@ -21,6 +22,27 @@ void INVENT_API Test()
     sol::state lua;
     lua.open_libraries(sol::lib::base); // 開啟 Lua 基礎庫
     lua.script("print('[Lua] sol2 綁定成功！這是來自 Lua 腳本的打印。')");
+
+    // test yoga
+    YGNodeRef root = YGNodeNew();
+    YGNodeStyleSetFlexDirection(root, YGFlexDirectionRow);
+    YGNodeStyleSetWidth(root, 100.0f);
+    YGNodeStyleSetHeight(root, 100.0f);
+
+    YGNodeRef child0 = YGNodeNew();
+    YGNodeStyleSetFlexGrow(child0, 1.0f);
+    YGNodeStyleSetMargin(child0, YGEdgeRight, 10.0f);
+    YGNodeInsertChild(root, child0, 0.0f);
+
+    YGNodeRef child1 = YGNodeNew();
+    YGNodeStyleSetFlexGrow(child1, 1.0f);
+    YGNodeInsertChild(root, child1, 1.0f);
+
+    YGNodeCalculateLayout(root, YGUndefined, YGUndefined, YGDirectionLTR);
+    float left = YGNodeLayoutGetLeft(child0);
+    float height = YGNodeLayoutGetHeight(child0);
+
+    std::cout << "child0 left : " << left << ", height : " << height << std::endl;
 
     INVENT::ILog::Info(INVENT::IEngineTools::GetRunPath());
 }

@@ -39,12 +39,17 @@ foreach(FILE ${ENGINE_ALL_FILES})
     source_group("${REL_DIR}" FILES "${FILE}")
 endforeach()
 
-target_compile_definitions(Engine 
-    PRIVATE EXPORTING_ENGINE
-    PRIVATE SHOW_LOGS
-)
 if(ENGINE_DEVELOPMENT_MODE)
-        target_compile_definitions(Engine PRIVATE ENGINE_DEVELOPMENT_MODE)
+    target_compile_definitions(Engine 
+        PRIVATE EXPORTING_ENGINE
+        PRIVATE SHOW_LOGS
+        PRIVATE ENGINE_DEVELOPMENT_MODE
+    )
+else()
+    target_compile_definitions(Engine 
+        PRIVATE EXPORTING_ENGINE
+        PRIVATE SHOW_LOGS
+    )
 endif()
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
@@ -52,6 +57,7 @@ set(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/Lua")
 set(ONE_HEANER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/OneHeader")
 set(BULLET3_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/bullet3/src")
 set(YAML_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yaml-cpp")
+set(YOGA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yoga")
 
 target_include_directories(Engine 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include  # 公共头文件目录
@@ -61,6 +67,7 @@ target_include_directories(Engine
     PRIVATE ${ONE_HEANER_DIR} # 一头文件目录
     PRIVATE ${BULLET3_SRC_DIR} # bullet3 源文件目录
     PRIVATE ${YAML_CPP_DIR}/include # yaml-cpp 头文件目录
+    PRIVATE ${YOGA_DIR} # yoga 头文件目录
 )
 
 target_link_libraries(Engine 
@@ -68,6 +75,7 @@ target_link_libraries(Engine
     PRIVATE assimp
     PRIVATE freetype
     PRIVATE yaml-cpp
+    PRIVATE yogacore
     PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
     PRIVATE ${LUA_DIR}/lib/lua54.lib
 

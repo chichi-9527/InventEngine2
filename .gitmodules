@@ -17,3 +17,4 @@
 [submodule "ThirdParty/Other/yoga"]
 	path = ThirdParty/Other/yoga
 	url = https://github.com/chichi-9527/yoga.git
+	branch = release-v3.2

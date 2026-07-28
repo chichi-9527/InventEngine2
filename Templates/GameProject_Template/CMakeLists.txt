@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #通过环境变量获取引擎根目录
 set(INVENT_ENGINE_ROOT_DIR "$ENV{INVENT_ENGINE_DIR}")
 if(NOT INVENT_ENGINE_ROOT_DIR)
-    message(FATAL_ERROR "找不到環境變數 INVENT_ENGINE_DIR! 請先編譯/生成引擎解決方案。")
+    message(FATAL_ERROR "Environment variable INVENT_ENGINE_DIR not found. Please build engine solution first.")
 endif()
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -19,12 +19,12 @@ execute_process(
 )
 
 if(NOT PIP_RESULT EQUAL 0)
-    message(FATAL_ERROR "pip3 安装 pyyaml 失败。")
+    message(FATAL_ERROR "pip3 install pyyaml error. Please install it manually.")
 endif()
 
 # 注册项目到 projects.yaml
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${INVENT_ENGINE_ROOT_DIR}/EngineEditor/Projects/register_project.py" "${PROJECT_NAME}" "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMAND ${Python3_EXECUTABLE} "${INVENT_ENGINE_ROOT_DIR}/Config/Projects/register_project.py" "${PROJECT_NAME}" "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE PYTHON_RESULT
 )
 
