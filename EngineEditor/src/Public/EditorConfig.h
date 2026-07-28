@@ -5,7 +5,7 @@
  #define INVENT_EDITOR 0
  #endif
 
-#define DevelopmentMode 0
+#define DevelopmentMode 1
 
 // 开发模式时，更简单的更换是否开启编辑器
 #if DevelopmentMode

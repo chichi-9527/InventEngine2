@@ -38,13 +38,14 @@ void LoadProjectRegistry()
 {
     g_RegisteredProjects.clear();
     // 讀取項目清單（相對於之前設定的 VS_DEBUGGER_WORKING_DIRECTORY 根目錄）
-    std::string registryPath = "EngineEditor/Projects/projects.yaml";
+    std::string registryPath = "Config/Projects/projects.yaml";
 
     if (!std::filesystem::exists(registryPath)) return;
 
     try
     {
         YAML::Node root = YAML::LoadFile(registryPath);
+
         for (const auto& node : root)
         {
             GameProjectInfo proj;

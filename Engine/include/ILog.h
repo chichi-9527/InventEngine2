@@ -19,17 +19,17 @@ namespace INVENT
 		std::string LogfileName;
 	};
 
-	class INVENT_API ILog
+	class ILog
 	{
 	public:
-		static void Init(const ILogInitInfo& info = {});
+		static INVENT_API void Init(const ILogInitInfo& info = {});
 
-		static void Info(const std::string& log);
-		static void Warning(const std::string& log);
-		static void Debug(const std::string& log);
-		static void Error(const std::string& log);
-		static void Trace(const std::string& log);
-		static void Fatal(const std::string& log);
+		static INVENT_API void Info(const std::string& log);
+		static INVENT_API void Warning(const std::string& log);
+		static INVENT_API void Debug(const std::string& log);
+		static INVENT_API void Error(const std::string& log);
+		static INVENT_API void Trace(const std::string& log);
+		static INVENT_API void Fatal(const std::string& log);
 
 	private:
 		static std::string _get_current_time();
@@ -71,14 +71,14 @@ extern "C"
 #define INVENT_LOG_INFO(X)		INVENT::ILog::Info(X)
 #define INVENT_LOG_WARNING(X)	INVENT::ILog::Warning(X)
 #define INVENT_LOG_DEBUG(X)		INVENT::ILog::Debug(X)
-#define INVENT_LOG_ERROE(X)		INVENT::ILog::Error(X)
+#define INVENT_LOG_ERROR(X)		INVENT::ILog::Error(X)
 #define INVENT_LOG_TRACE(X)		INVENT::ILog::Trace(X)
 #define INVENT_LOG_FATAL(X)		INVENT::ILog::Fatal(X)
 #else
 #define INVENT_LOG_INFO(X)
 #define INVENT_LOG_WARNING(X)
 #define INVENT_LOG_DEBUG(X)
-#define INVENT_LOG_ERROE(X)
+#define INVENT_LOG_ERROR(X)
 #define INVENT_LOG_TRACE(X)
 #define INVENT_LOG_FATAL(X)
 #endif // SHOW_LOGS
