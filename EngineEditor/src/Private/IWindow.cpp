@@ -45,7 +45,7 @@ namespace INVENT
 		this->_glfw_window = glfwCreateWindow(static_cast<int>(width),
 			static_cast<int>(height),
 			title.c_str(),
-			_glfw_monitor, nullptr);
+			nullptr, nullptr);
 		if (_glfw_window == nullptr)
 		{
 			INVENT_LOG_ERROR("[IWindow] Failed to create a glfw window!");
@@ -57,7 +57,7 @@ namespace INVENT
 		glfwSetFramebufferSizeCallback(_glfw_window, [](GLFWwindow* window, int width, int height) {
 			if (IWindow* iwindow = reinterpret_cast<IWindow*>(glfwGetWindowUserPointer(window)))
 			{
-				WindowSize size{ static_cast<uint32_t>(width), static_cast<uint32_t>(width) , true };
+				WindowSize size{ static_cast<uint32_t>(width), static_cast<uint32_t>(height) , true };
 				iwindow->_window_size.store(size, std::memory_order_release);
 			}
 			});

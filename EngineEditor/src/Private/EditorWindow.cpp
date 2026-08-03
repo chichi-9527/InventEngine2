@@ -49,6 +49,18 @@ namespace Editor
 
 bool EditorWindow::Start()
 {
+    //
+    if (!GetGameProjects())
+    {
+        return false;
+    }
+//#if !WITH_EDITOR
+    if (!LoadGame())
+    {
+        return false;
+    }
+//#endif
+
     Begin();
 
     // start render loop
@@ -69,23 +81,31 @@ bool EditorWindow::Start()
     }
 
     End();
+
+    UnLoadGame();
     return true;
 }
 
 void EditorWindow::Begin()
-{}
+{
+    Editor::GameModuleInstance->BeginPlay();
+}
 
 void EditorWindow::Tick(float delta)
-{}
+{
+    Editor::GameModuleInstance->Tick(delta);
+}
 
 void EditorWindow::End()
-{}
+{
+    Editor::GameModuleInstance->EndPlay();
+}
 
-bool EditorWindow::SeleteGame()
+bool EditorWindow::GetGameProjects()
 {
     if (!std::filesystem::exists(Editor::RegistryPath))
     {
-        INVENT_LOG_ERROR(std::format("[Editor] not find config file : {}", Editor::RegistryPath));
+        INVENT_LOG_ERROR(std::format("[Game] not find config file : {}", Editor::RegistryPath));
         return false;
     }
     try
@@ -113,12 +133,12 @@ bool EditorWindow::SeleteGame()
     INVENT_LOG_INFO(std::format("[Editor] 获取到游戏项目数量: {}.", Editor::RegisteredProjects.size()));
     for (auto& game : Editor::RegisteredProjects)
     {
-        INVENT_LOG_INFO(std::format("[Editor] 获取到游戏项目: name : {}. path : {}", game.name, game.path));
+        INVENT_LOG_INFO(std::format("[Editor] 获取到游戏项目:\n\t name : {}. path : {}", game.name, game.path));
     }
 #else
     if (Editor::GameInfo.name.empty())
     {
-        INVENT_LOG_ERROR(std::format("[Editor] 找不到游戏文件 配置文件路径 : {}", Editor::RegistryPath));
+        INVENT_LOG_ERROR(std::format("[Game] 找不到游戏文件 配置文件路径 : {}", Editor::RegistryPath));
         return false;
     }
 #endif
@@ -131,9 +151,49 @@ bool EditorWindow::LoadGame()
     std::string dllPath = EditorWindow::_get_dll_path();
     if (!std::filesystem::exists(dllPath))
     {
-        INVENT_LOG_ERROR(std::format("[Editor] 找不到游戏动态库: {}. 请先编译该游戏项目！", dllPath));
+        INVENT_LOG_ERROR(std::format("[Game] 找不到游戏动态库: {}. 请先编译该游戏项目！", dllPath));
         return false;
     }
+
+    Editor::hGameDLL = LoadLibraryA(dllPath.c_str());
+    if (!Editor::hGameDLL)
+    {
+        INVENT_LOG_ERROR(std::format("[Game] 無法加載 DLL，錯誤代碼: {}.", GetLastError()));
+        return false;
+    }
+    Editor::pfnCreateGame = (CreateGameModuleFunc)GetProcAddress(Editor::hGameDLL, "CreateGameModule");
+    Editor::pfnDestroyGame = (DestroyGameModuleFunc)GetProcAddress(Editor::hGameDLL, "DestroyGameModule");
+    if (!Editor::pfnCreateGame || !Editor::pfnDestroyGame)
+    {
+        INVENT_LOG_ERROR("[Game] 遊戲 DLL 格式不正確，找不到 Create/Destroy 導出符號！");
+        FreeLibrary(Editor::hGameDLL);
+        return false;
+    }
+    // 实例化游戏模组
+    Editor::GameModuleInstance = Editor::pfnCreateGame();
+    if (!Editor::GameModuleInstance)
+    {
+        INVENT_LOG_ERROR("[Game] 游戏模组实例失败! ");
+        return false;
+    }
+
+    INVENT_LOG_INFO("[Game] 游戏已加载.");
+    return true;
+}
+
+void EditorWindow::UnLoadGame()
+{
+    if (Editor::GameModuleInstance && Editor::pfnDestroyGame)
+    {
+        Editor::pfnDestroyGame(Editor::GameModuleInstance);
+        Editor::GameModuleInstance = nullptr;
+    }
+    if (Editor::hGameDLL)
+    {
+        FreeLibrary(Editor::hGameDLL);
+        Editor::hGameDLL = nullptr;
+    }
+    INVENT_LOG_INFO("[Game] 外部遊戲模組已安全卸載。");
 }
 
 std::string EditorWindow::_get_dll_path()
@@ -143,6 +203,8 @@ std::string EditorWindow::_get_dll_path()
     std::string path = game.path;
     std::string dllPath = path + "/lib/" + CURRENT_BUILD_CONFIG + "/" + game.name + ".dll";
 #else
-
+    std::string dllPath = std::string("./") + Editor::GameInfo.name + ".dll";
 #endif
+
+    return dllPath;
 }
