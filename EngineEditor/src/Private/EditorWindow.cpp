@@ -4,6 +4,7 @@
 
 #include <ILog.h>
 #include <IGameModule.h>
+#include <IRenderThreadBase.h>
 
 #include <filesystem>
 #include <chrono>
@@ -61,9 +62,16 @@ bool EditorWindow::Start()
     }
 //#endif
 
-    Begin();
-
     // start render loop
+    INVENT::IRenderThreadBase::Instance().SetCreateSurfaceFunction(
+        [](VkInstance instance, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface)->VkResult
+        {
+            return glfwCreateWindowSurface(instance, IWindow::_glfw_window, allocator, surface);
+        }
+    );
+    INVENT::IRenderThreadBase::Instance().Start();
+
+    Begin();
 
     float deltaTime = 0.0f;
     auto lastFrame = std::chrono::high_resolution_clock::now();
@@ -81,7 +89,7 @@ bool EditorWindow::Start()
     }
 
     End();
-
+    INVENT::IRenderThreadBase::Instance().Shutdown();
     UnLoadGame();
     return true;
 }
@@ -130,10 +138,11 @@ bool EditorWindow::GetGameProjects()
 
 #if WITH_EDITOR
     // 获取到全部游戏项目
-    INVENT_LOG_INFO(std::format("[Editor] 获取到游戏项目数量: {}.", Editor::RegisteredProjects.size()));
+    INVENT_LOG_INFO(std::format("[Editor] 获取到游戏项目数量: {}. 项目: ", Editor::RegisteredProjects.size()));
+    std::uint32_t num = 0;
     for (auto& game : Editor::RegisteredProjects)
     {
-        INVENT_LOG_INFO(std::format("[Editor] 获取到游戏项目:\n\t name : {}. path : {}", game.name, game.path));
+        INVENT_LOG_INFO(std::format("\t {}. name : {}. path : {}", ++num, game.name, game.path));
     }
 #else
     if (Editor::GameInfo.name.empty())
