@@ -96,8 +96,26 @@ namespace INVENT
 		return out;
 	}
 
+    IText::IText(const char* utf8)
+    {
+        _from_utf8(utf8, std::strlen(utf8));
+    }
+
+    IText::IText(const char8_t* utf8)
+    {
+        _from_utf8(utf8, std::strlen(reinterpret_cast<const char*>(utf8)));
+    }
+
+    const char* IText::ToUtf8CStr()
+    {
+        ToUtf8(_utf8_cache);
+        return _utf8_cache.c_str();
+    }
+
 	void IText::_from_utf8(const void* utf8_str, size_t str_size)
 	{
+        if (utf8_str == nullptr) return;
+
 		_data.clear();
         size_t i = 0;
 

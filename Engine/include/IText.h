@@ -8,18 +8,18 @@
 namespace INVENT
 {
 
-	class INVENT_API IText
+	class IText
 	{
 	public:
 		// out len min 5 (chinese max 4 byte and \0)
-		static size_t ToUtf8FromUInt32(const uint32_t code_point, char out[5]);
+		static INVENT_API size_t ToUtf8FromUInt32(const uint32_t code_point, char out[5]);
 
 	public:
-		~IText() = default;
-		IText() = default;
-		IText(const IText& other) = default;
-		IText(IText&& other) noexcept = default;
-		IText& operator=(IText&& other) noexcept = default;
+		INVENT_API ~IText() = default;
+		INVENT_API IText() = default;
+		INVENT_API IText(const IText& other) = default;
+		INVENT_API IText(IText&& other) noexcept = default;
+		INVENT_API IText& operator=(IText&& other) noexcept = default;
 
 		IText(const std::string& utf8);
 		IText(const std::u8string& utf8);
@@ -27,6 +27,12 @@ namespace INVENT
 		void ToUtf8(std::string& out_utf8);
 		std::string ToUtf8();
 
+		INVENT_API IText(const char* utf8);
+		INVENT_API IText(const char8_t* utf8);
+
+		// 在更改并再次调用此函数前指针总是正确的
+		INVENT_API const char* ToUtf8CStr();
+		
 
 		char32_t operator[](size_t index)
 		{
@@ -69,11 +75,17 @@ namespace INVENT
 			return _data.rend();
 		}
 
+		constexpr size_t size() const noexcept
+		{
+			return _data.size();
+		}
+
 	private:
 		void _from_utf8(const void* utf8_str, size_t str_size);
 		
 	private:
 		std::u32string _data;
+		std::string _utf8_cache;
 	};
 
 
