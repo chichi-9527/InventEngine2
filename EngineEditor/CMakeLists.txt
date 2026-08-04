@@ -14,12 +14,18 @@ target_precompile_headers(EngineEditor PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Private/editor_pch.h"
 )
 
-file(GLOB_RECURSE EXCLUDE_PCH_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/*.cpp"
+set(EXCLUDE_PCH_FILES_EDITOR
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/imgui_demo.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/imgui_draw.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/imgui_impl_glfw.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/imgui_impl_vulkan.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/imgui_tables.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/imgui_widgets.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8/imgui.cpp"
 )
 
-set_source_files_properties(${EXCLUDE_PCH_FILES} PROPERTIES
-    SKIP_PRECOMPILE_HEADER ON
+set_source_files_properties(${EXCLUDE_PCH_FILES_EDITOR}
+    PROPERTIES SKIP_PRECOMPILE_HEADERS ON
 )
 
 # 源文件分组
@@ -32,6 +38,7 @@ endforeach()
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
 set(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/Lua")
+set(ENGINE_EDITOR_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Engine/EditorInclude")
 
 target_include_directories(EngineEditor
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Imgui_1_92_8
@@ -39,6 +46,7 @@ target_include_directories(EngineEditor
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Private
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
     PRIVATE ${SDK_DIR}/include # sdk 头文件目录
+    PRIVATE ${ENGINE_EDITOR_INCLUDE_DIR} # engine editor 头文件目录
 )
 
 target_link_libraries(EngineEditor
