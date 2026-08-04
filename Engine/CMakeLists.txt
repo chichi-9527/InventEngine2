@@ -75,7 +75,6 @@ target_include_directories(Engine
 )
 
 target_link_libraries(Engine 
-    PRIVATE SlangCompiler
     PRIVATE assimp
     PRIVATE freetype
     PRIVATE yaml-cpp

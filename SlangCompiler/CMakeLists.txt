@@ -30,6 +30,7 @@ target_include_directories(SlangCompiler
 )
 
 target_link_libraries(SlangCompiler 
+    PRIVATE Engine
     PRIVATE "${SDK_DIR}/lib/slang.lib"
     PRIVATE "${SDK_DIR}/lib/slang-compiler.lib"
     PRIVATE "${SDK_DIR}/lib/slang-rt.lib"

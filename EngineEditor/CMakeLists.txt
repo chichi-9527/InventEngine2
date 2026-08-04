@@ -51,6 +51,7 @@ target_include_directories(EngineEditor
 
 target_link_libraries(EngineEditor
     PRIVATE Engine
+    PRIVATE SlangCompiler
     PRIVATE glfw
     PRIVATE yaml-cpp
     PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
@@ -104,5 +105,9 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/../Config/GameConfig"
         "$<TARGET_FILE_DIR:EngineEditor>/Config/GameConfig"
+
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../Config/Shaders"
+        "$<TARGET_FILE_DIR:EngineEditor>/Config/Shaders"
     )
 endif()
