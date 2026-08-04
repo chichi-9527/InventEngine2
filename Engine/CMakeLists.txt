@@ -8,6 +8,9 @@ file(GLOB_RECURSE ENGINE_INCS
         "Private/*.h"
         "Private/*.hpp"
         "Private/*.ipp"
+        "EditorInclude/*.h"
+        "EditorInclude/*.hpp"
+        "EditorInclude/*.ipp"
 )
 
 set(ENGINE_ALL_FILES ${ENGINE_SRCS} ${ENGINE_INCS})
@@ -62,6 +65,7 @@ set(YOGA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yoga")
 target_include_directories(Engine 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include  # 公共头文件目录
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Private # 私有头文件目录
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/EditorInclude # engine editor 头文件目录
     PRIVATE ${SDK_DIR}/include # sdk 头文件目录
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
     PRIVATE ${ONE_HEANER_DIR} # 一头文件目录
