@@ -45,7 +45,7 @@ target_include_directories(EngineEditor
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Public
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Private
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
-    PRIVATE ${SDK_DIR}/include # sdk 头文件目录
+    PRIVATE ${GLOBAL_VULKAN_SDK_INC} # vulkan sdk 头文件目录(slang and vulkan headers)
     PRIVATE ${ENGINE_EDITOR_INCLUDE_DIR} # engine editor 头文件目录
 )
 
@@ -54,7 +54,7 @@ target_link_libraries(EngineEditor
     PRIVATE SlangCompiler
     PRIVATE glfw
     PRIVATE yaml-cpp
-    PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
+    PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/vulkan-1.lib
     PRIVATE ${LUA_DIR}/lib/lua54.lib
 )
 
@@ -81,15 +81,28 @@ add_custom_command(TARGET EngineEditor POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
     $<TARGET_FILE:Engine>
     $<TARGET_FILE_DIR:EngineEditor>
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${GLOBAL_VULKAN_SDK_BIN}/slang.dll"
+    "$<TARGET_FILE_DIR:EngineEditor>/slang.dll"
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${GLOBAL_VULKAN_SDK_BIN}/slang-compiler.dll"
+    "$<TARGET_FILE_DIR:EngineEditor>/slang-compiler.dll"
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${GLOBAL_VULKAN_SDK_BIN}/slang-glslang.dll"
+    "$<TARGET_FILE_DIR:EngineEditor>/slang-glslang.dll"
+
+    # copy dll files to EngineEditor directory
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${SDK_DIR_BIN}"
+    $<TARGET_FILE_DIR:EngineEditor>
 )
 
 if(ENGINE_BUILD_EDITOR)
     add_custom_command(TARGET EngineEditor POST_BUILD
-        # copy dll files to EngineEditor directory
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${SDK_DIR_BIN}"
-        $<TARGET_FILE_DIR:EngineEditor>
-
+        
         # copy config files to EngineEditor directory
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/../Config"
@@ -97,10 +110,7 @@ if(ENGINE_BUILD_EDITOR)
     )
 else()
     add_custom_command(TARGET EngineEditor POST_BUILD
-        # copy dll files to EngineEditor directory
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${SDK_DIR_BIN}"
-        $<TARGET_FILE_DIR:EngineEditor>
+        
 
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/../Config/GameConfig"
