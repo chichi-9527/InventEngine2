@@ -1,6 +1,7 @@
 ﻿#include "IVulkan/IRenderThread.h"
 
 #include "ILog.h"
+#include "IVulkan/VulkanBase.h"
 
 namespace INVENT
 {
@@ -18,6 +19,12 @@ namespace INVENT
 			INVENT_LOG_ERROR("you need set create surface function before start!");
 			return false;
 		}
+
+		if (!IVulkanBase::Base().CreateVulkanInstance())
+		{
+			return false;
+		}
+
 		return true;
 	}
 
