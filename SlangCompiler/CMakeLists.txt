@@ -22,16 +22,13 @@ target_compile_definitions(SlangCompiler
     PRIVATE SHOW_LOGS
 )
 
-set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
-
 target_include_directories(SlangCompiler 
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE "${SDK_DIR}/include/slang"
+    PRIVATE ${GLOBAL_VULKAN_SDK_INC} # vulkan sdk 头文件目录(slang and vulkan headers)
 )
 
 target_link_libraries(SlangCompiler 
     PRIVATE Engine
-    PRIVATE "${SDK_DIR}/lib/slang.lib"
-    PRIVATE "${SDK_DIR}/lib/slang-compiler.lib"
-    PRIVATE "${SDK_DIR}/lib/slang-rt.lib"
+    PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/slang.lib
+    PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/slang-compiler.lib
 )

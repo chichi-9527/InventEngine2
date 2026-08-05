@@ -66,9 +66,9 @@ target_include_directories(Engine
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include  # 公共头文件目录
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Private # 私有头文件目录
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/EditorInclude # engine editor 头文件目录
-    PRIVATE ${SDK_DIR}/include # sdk 头文件目录
+    PRIVATE ${GLOBAL_VULKAN_SDK_INC} # vulkan sdk 头文件目录(slang and vulkan headers)
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
-    PRIVATE ${ONE_HEANER_DIR} # 一头文件目录
+    PRIVATE ${ONE_HEANER_DIR} # one-header 头文件目录
     PRIVATE ${BULLET3_SRC_DIR} # bullet3 源文件目录
     PRIVATE ${YAML_CPP_DIR}/include # yaml-cpp 头文件目录
     PRIVATE ${YOGA_DIR} # yoga 头文件目录
@@ -79,7 +79,7 @@ target_link_libraries(Engine
     PRIVATE freetype
     PRIVATE yaml-cpp
     PRIVATE yogacore
-    PRIVATE ${SDK_DIR}/lib/vulkan-1.lib
+    PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/vulkan-1.lib
     PRIVATE ${LUA_DIR}/lib/lua54.lib
 
     # bullet3

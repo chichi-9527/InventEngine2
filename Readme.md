@@ -2,6 +2,8 @@
 
 ## 项目配置
     c++20
+    下载 Vulkan SDK 最低版本1.4.350.0：[Vulkan SDK](https://vulkan.lunarg.com/sdk/home) 并添加到环境变量中。(安装时勾选添加到环境变量即可)
+    安装 python3 并添加到环境变量中。
 
 ## 如何 clone 项目
     git clone --recursive [InventEngine2](https://github.com/chichi-9527/InventEngine2.git)

@@ -50,6 +50,26 @@ if(MSVC)
 
 endif()
 
+# 查找 Vulkan 库
+find_package(Vulkan REQUIRED)
+if(NOT Vulkan_FOUND)
+    # 彈出極其顯眼的錯誤提示，指導開發者如何解決
+    message(FATAL_ERROR 
+        "\n===============================================================================\n"
+        "[Engine Error]: not found Vulkan SDK!\n\n"
+        "Please follow the steps below to configure your development environment:\n"
+        "1. Go to download and install Vulkan SDK: https://vulkan.lunarg.com/sdk/home\n"
+        "2. Important: Please check \"Add Vulkan_SDK to environment variables\" \n"
+        "   (or ensure VULKAN_SDK environment variable points to your installation directory)\n"
+        "3. Please restart your development IDE(like VS 2022) or command prompt to apply environment variables.\n"
+        "==============================================================================="
+    )
+endif()
+message(STATUS "[Root] Found Vulkan SDK: ${Vulkan_LIBRARY}")
+set(GLOBAL_VULKAN_SDK_INC "$ENV{VULKAN_SDK}/Include" CACHE STRING "Vulkan SDK include directory")
+set(GLOBAL_VULKAN_SDK_LIB "$ENV{VULKAN_SDK}/Lib" CACHE STRING "Vulkan SDK lib directory")
+set(GLOBAL_VULKAN_SDK_BIN "$ENV{VULKAN_SDK}/Bin" CACHE STRING "Vulkan SDK bin directory")
+
 
 # 第三方库
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
