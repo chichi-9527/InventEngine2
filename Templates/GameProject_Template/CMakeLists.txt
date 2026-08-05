@@ -55,6 +55,7 @@ foreach(FILE ${GAME_ALL_FILES})
 endforeach()
 
 target_include_directories(${PROJECT_NAME}
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/Public"
     PRIVATE "${INVENT_ENGINE_ROOT_DIR}/Engine/include"
     PRIVATE "${INVENT_ENGINE_ROOT_DIR}/ThirdParty/SDK/Lua/include"
     PRIVATE "${INVENT_ENGINE_ROOT_DIR}/ThirdParty/OneHeaner"
