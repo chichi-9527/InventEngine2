@@ -60,8 +60,11 @@ bool EditorWindow::Start()
     {
         return false;
     }
+
+    Begin();
 //#endif
 
+    if (!_get_and_set_required_instance_extensions()) return false;
     // start render loop
     INVENT::IRenderThreadBase::Instance().SetCreateSurfaceFunction(
         [](VkInstance instance, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface)->VkResult
@@ -69,9 +72,13 @@ bool EditorWindow::Start()
             return glfwCreateWindowSurface(instance, IWindow::_glfw_window, allocator, surface);
         }
     );
-    INVENT::IRenderThreadBase::Instance().Start();
+    if (!INVENT::IRenderThreadBase::Instance().Start())
+    {
+        Terminate();
+        return false;
+    }
 
-    Begin();
+    
 
     float deltaTime = 0.0f;
     auto lastFrame = std::chrono::high_resolution_clock::now();
@@ -88,9 +95,12 @@ bool EditorWindow::Start()
         glfwPollEvents();
     }
 
-    End();
+    
     INVENT::IRenderThreadBase::Instance().Shutdown();
+//#if !WITH_EDITOR
+    End();
     UnLoadGame();
+//#endif
     return true;
 }
 
@@ -216,4 +226,21 @@ std::string EditorWindow::_get_dll_path()
 #endif
 
     return dllPath;
+}
+
+bool EditorWindow::_get_and_set_required_instance_extensions()
+{
+    uint32_t extensionCount = 0;
+    const char** extensionNames;
+    extensionNames = glfwGetRequiredInstanceExtensions(&extensionCount);
+    if (!extensionNames)
+    {
+        INVENT_LOG_ERROR("[Window] 返回 GLFW 所需的 Vulkan 实例扩展失败！");
+        return false;
+    }
+    for (size_t i = 0; i < extensionCount; i++)
+    {
+        INVENT::IRenderThreadBase::Instance().SetVulkanInstanceExtension(extensionNames[i]);
+    }
+    return true;
 }

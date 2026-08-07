@@ -19,5 +19,7 @@ namespace INVENT
 		virtual bool Start() = 0;
 		virtual void Shutdown() = 0;
 
+		void SetVulkanInstanceExtension(const char* extension_name);
+
 	};
 }

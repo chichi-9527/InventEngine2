@@ -8,7 +8,7 @@
 #include <yoga/Yoga.h>
 #include <iostream>
 
-void INVENT_API Test()
+void Test()
 {
     //INVENT::ILog::Init();
 
