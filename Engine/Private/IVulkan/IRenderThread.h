@@ -2,6 +2,10 @@
 
 #include "IRenderThreadBase.h"
 
+#include <thread>
+#include <atomic>
+#include <memory>
+
 namespace INVENT
 {
 	class IRenderThread : public IRenderThreadBase
@@ -18,6 +22,11 @@ namespace INVENT
 		void Shutdown() override;
 
 	private:
+		bool _init_vulkan();
+
+	private:
 		CreateSurfaceFunc _create_surface = nullptr;
+
+		std::atomic_bool _running{ false };
 	};
 }

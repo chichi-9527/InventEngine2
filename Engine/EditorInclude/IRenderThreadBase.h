@@ -20,6 +20,7 @@ namespace INVENT
 		virtual void Shutdown() = 0;
 
 		void SetVulkanInstanceExtension(const char* extension_name);
+		void SetVulkanWaitForWindowEventsFunction(void(*func)());
 
 	};
 }

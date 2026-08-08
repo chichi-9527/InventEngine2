@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <functional>
 
 namespace INVENT
 {
@@ -42,6 +43,8 @@ namespace INVENT
 		};
 	
 		IVulkanBase() = default;
+	public:
+		using WaitForWindowEventsFunc = std::function<void()>;
 
 	public:
 		~IVulkanBase();
@@ -52,6 +55,7 @@ namespace INVENT
 
 		static IVulkanBase& Base();
 
+		void SetWaitForWindowEventsFunction(WaitForWindowEventsFunc func) { _wait_for_window_events = func; }
 		void SetSurface(VkSurfaceKHR surface) { if (!_surface) _surface = surface; }
 		bool CreateVulkanInstance();
 		bool PickPhysicalDevice();
@@ -66,6 +70,47 @@ namespace INVENT
 		bool CreateGlobalPipelineLayout();
 		bool AllocaGlobalBindlessDescriptorSet();
 		bool CreateCommandPool();
+
+		// tools
+
+		enum class ModelBlendMode
+		{
+			Opaque,       // 不透明（開啟深度寫入，關閉混合）
+			Masked,       // 鏤空測試（開啟深度寫入，關閉混合，Shader 內 discard）
+			Translucent   // 透明（關閉深度寫入，開啟 Alpha Blending）
+		};
+		struct SpecializationData
+		{
+			int BlendMode = 0;   // 對應 Slang 中的 BLEND_MODE
+		};
+		struct GraphicsPipelineConfig
+		{
+			VkShaderModule VertexShader = VK_NULL_HANDLE;
+			VkShaderModule FragmentShader = VK_NULL_HANDLE;
+
+			ModelBlendMode BlendMode = ModelBlendMode::Opaque;
+			SpecializationData SpecData = {};
+			uint32_t SpecCount = 1;
+
+			// vulkan >= 1.3
+			VkFormat ColorAttachmentFormat = VK_FORMAT_UNDEFINED;
+			VkFormat DepthAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+			VkBool32 EnableDepthTest = VK_TRUE;
+			VkCullModeFlags CullMode = VK_CULL_MODE_BACK_BIT;
+
+		};
+		VkPipeline CreateGraphicsPipeline(const GraphicsPipelineConfig& config);
+		VkShaderModule CreateShaderMoudle(const std::string& path);
+		void DestroyShaderMoudle(VkShaderModule shader_moudle);
+		void UpdateBindlessTextureSlot(uint32_t slot_id, VkImageView texture_image_view);
+		bool CreateSyncObjects(std::vector<VkFence>& frameFence,
+			std::vector<VkSemaphore>& acquireSemaphores,
+			std::vector<VkSemaphore>& submitSemaphores);
+		bool CreateCommandBuffers(std::vector<VkCommandBuffer>& buffers);
+		bool ResizeBindlessDescriptorPoolAndGobalSet();
+		VkCommandBuffer BeginSingleTimeCommands();
+		void EndSingleTimeCommands(VkCommandBuffer command_buffer);
 
 		// use vma
 
@@ -94,8 +139,14 @@ namespace INVENT
 		bool UseVmaMapMemory(VkBuffer buffer, void*& data);
 		void UseVmaUnmapMemory(VkBuffer buffer);
 
-
+		VkFormat GetSwapChainImageFormat() const { return _swap_chain_image_format; }
+		VkFormat GetDepthFormat() const { return _depth_format; }
+		VkFormat GetShadowDepthFormat() const { return _shadow_depth_format; }
 		VkInstance GetVkInstance() const { return _instance; }
+		VkDevice GetDevice() const { return _device; }
+		VkSwapchainKHR GetSwapChain() const { return _swap_chain; }
+		const VkPhysicalDeviceProperties& GetPhysicalDeviceProperties() const { return _physical_device_properties; }
+		uint32_t GetCurrentBindlessDescriptorCount() const { return _current_descriptor_count; }
 		const std::uint32_t GetAPIVersion() const noexcept { return _api_version; }
 		bool Version_1_3_OrHigher() const noexcept { return _api_version >= VK_API_VERSION_1_3; }
 	private:
@@ -115,6 +166,8 @@ namespace INVENT
 		bool _setup_debug_messenger();
 #endif // !VULKAN_VALITADION_LAYER
 	private:
+		WaitForWindowEventsFunc _wait_for_window_events = nullptr;
+
 		VkInstance _instance = VK_NULL_HANDLE;
 		VkDevice _device = VK_NULL_HANDLE;
 		VkSurfaceKHR _surface = VK_NULL_HANDLE;

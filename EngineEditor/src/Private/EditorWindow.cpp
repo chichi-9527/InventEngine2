@@ -72,6 +72,12 @@ bool EditorWindow::Start()
             return glfwCreateWindowSurface(instance, IWindow::_glfw_window, allocator, surface);
         }
     );
+    INVENT::IRenderThreadBase::Instance().SetVulkanWaitForWindowEventsFunction(
+        []()
+        {
+            glfwWaitEvents();
+        }
+    );
     if (!INVENT::IRenderThreadBase::Instance().Start())
     {
         Terminate();

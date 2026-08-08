@@ -7,5 +7,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <set>
+#include <array>
 
 #endif // __cplusplus

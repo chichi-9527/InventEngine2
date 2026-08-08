@@ -13,7 +13,20 @@ namespace INVENT
 
 	bool IRenderThread::Start()
 	{
-		INVENT_LOG_INFO("[IRenderThread] start.");
+		_running = true;
+		if (!_init_vulkan())
+		{
+			return false;
+		}
+	}
+
+	void IRenderThread::Shutdown()
+	{
+		INVENT_LOG_INFO("[IRenderThread] shutdown.");
+	}
+
+	bool IRenderThread::_init_vulkan()
+	{
 		if (this->_create_surface == nullptr)
 		{
 			INVENT_LOG_ERROR("you need set create surface function before start!");
@@ -51,13 +64,13 @@ namespace INVENT
 		return true;
 	}
 
-	void IRenderThread::Shutdown()
-	{
-		INVENT_LOG_INFO("[IRenderThread] shutdown.");
-	}
-
 	void IRenderThreadBase::SetVulkanInstanceExtension(const char* extension_name)
 	{
 		IVulkanBase::AddInstanceExtension(extension_name);
+	}
+
+	void IRenderThreadBase::SetVulkanWaitForWindowEventsFunction(void(*func)())
+	{
+		IVulkanBase::Base().SetWaitForWindowEventsFunction(func);
 	}
 }

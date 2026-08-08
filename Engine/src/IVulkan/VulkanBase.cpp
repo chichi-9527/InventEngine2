@@ -1,6 +1,8 @@
 ﻿#include "IVulkan/VulkanBase.h"
 
 #include "ILog.h"
+#include "IEngine.h"
+#include "IEngineTools.h"
 #include "IVulkan/VulkanConfig.h"
 
 #include <cstdlib>
@@ -94,6 +96,11 @@ namespace INVENT
 		if (!Version_1_3_OrHigher())
 		{
 			INVENT_LOG_FATAL("[VulkanBase] 需要的最低 vulkan 版本为 1.3");
+			return false;
+		}
+		if (_wait_for_window_events == nullptr)
+		{
+			INVENT_LOG_ERROR("[VulkanBase] 你需要设置等待窗口事件的函数.");
 			return false;
 		}
 
@@ -422,7 +429,8 @@ namespace INVENT
 
 	bool IVulkanBase::InitializeAllOffscreenPasses()
 	{
-		return false;
+		INVENT_LOG_WARNING("[VulkanBase] InitializeAllOffscreenPasses 还未实现.");
+		return true;
 	}
 
 	bool IVulkanBase::CreateBindlessDescriptorPool()
@@ -526,12 +534,418 @@ namespace INVENT
 
 	bool IVulkanBase::AllocaGlobalBindlessDescriptorSet()
 	{
-		return false;
+		// 1. 設置變長度陣列的實際分配數量
+		VkDescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo{};
+		variableCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+		variableCountInfo.descriptorSetCount = 1;
+		variableCountInfo.pDescriptorCounts = &_current_descriptor_count;
+
+		// 2. 填充常規的 Allocate 資訊
+		VkDescriptorSetAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocInfo.descriptorPool = _bindless_descriptor_pool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &_descriptor_set_layouts[1]; // set1Layout (Bindless)
+		allocInfo.pNext = &variableCountInfo;
+
+		if (VkResult result = vkAllocateDescriptorSets(_device, &allocInfo, &_global_bindless_descriptor_set))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create global descriptor set! VkResult: {}.", static_cast<int32_t>(result)));
+			return false;
+		}
+
+		return true;
 	}
 
 	bool IVulkanBase::CreateCommandPool()
 	{
-		return false;
+		VkCommandPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		poolInfo.queueFamilyIndex = _queue_family_indices.GraphicsFamily;
+		if (VkResult result = vkCreateCommandPool(_device, &poolInfo, nullptr, &_command_pool))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create command pool! VkResult: {}.", static_cast<int32_t>(result)));
+			return false;
+		}
+
+		return true;
+	}
+
+	VkPipeline IVulkanBase::CreateGraphicsPipeline(const GraphicsPipelineConfig& config)
+	{
+		std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+
+		// shader 特化常数
+		std::vector<VkSpecializationMapEntry> specMapEntries(1);
+		specMapEntries[0].constantID = 0;
+		specMapEntries[0].offset = offsetof(SpecializationData, BlendMode);
+		specMapEntries[0].size = sizeof(int);
+
+		VkSpecializationInfo specInfo{};
+		specInfo.mapEntryCount = config.SpecCount;
+		specInfo.pMapEntries = specMapEntries.data();
+		specInfo.dataSize = sizeof(SpecializationData);
+		specInfo.pData = &config.SpecData;
+
+		// 頂點階段
+		VkPipelineShaderStageCreateInfo vertStageInfo{};
+		vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+		vertStageInfo.module = config.VertexShader;
+		vertStageInfo.pName = "main";
+		vertStageInfo.pSpecializationInfo = nullptr; // VS 通常不需要材質的特化常量
+		shaderStages.push_back(vertStageInfo);
+
+		if (config.FragmentShader != VK_NULL_HANDLE)
+		{
+			VkPipelineShaderStageCreateInfo fragStageInfo{};
+			fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+			fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			fragStageInfo.module = config.FragmentShader;
+			fragStageInfo.pName = "main";
+			fragStageInfo.pSpecializationInfo = &specInfo;
+			shaderStages.push_back(fragStageInfo);
+		}
+
+		// 頂點輸入狀態 (Manual Vertex Fetch 核心：保持留空)
+		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+		// 幾何拓撲
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		// 光柵化
+		VkPipelineRasterizationStateCreateInfo rasterizer{};
+		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.lineWidth = 1.0f;
+		rasterizer.cullMode = config.CullMode;
+		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		rasterizer.depthBiasEnable = (config.FragmentShader == VK_NULL_HANDLE) ? VK_TRUE : VK_FALSE;
+
+		// 多重採樣
+		VkPipelineMultisampleStateCreateInfo multisampling{};
+		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+		// 深度測試狀態
+		VkPipelineDepthStencilStateCreateInfo depthStencil{};
+		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable = config.EnableDepthTest;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+		if (config.BlendMode == ModelBlendMode::Translucent)
+		{
+			depthStencil.depthWriteEnable = VK_FALSE;
+		}
+		else
+		{
+			depthStencil.depthWriteEnable = config.EnableDepthTest;
+		}
+
+		// 顏色混合狀態
+		VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+		colorBlendAttachment.colorWriteMask = 0xf;
+		if (config.BlendMode == ModelBlendMode::Translucent)
+		{
+			colorBlendAttachment.blendEnable = VK_TRUE;
+			colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+			colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+			colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+			colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+		}
+		else
+		{
+			colorBlendAttachment.blendEnable = VK_FALSE;
+		}
+
+		VkPipelineColorBlendStateCreateInfo colorBlending{};
+		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		colorBlending.attachmentCount = (config.FragmentShader == VK_NULL_HANDLE) ? 0 : 1;
+		colorBlending.pAttachments = &colorBlendAttachment;
+
+		// 動態狀態
+		std::array<VkDynamicState, 2> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dynamicState{};
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+		dynamicState.pDynamicStates = dynamicStates.data();
+
+		VkPipelineViewportStateCreateInfo viewportState{};
+		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.scissorCount = 1;
+
+		// 核心：Vulkan 1.3+ 動態渲染結構體設定
+		VkPipelineRenderingCreateInfo pipelineRenderingCI{};
+		pipelineRenderingCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+		if (config.FragmentShader != VK_NULL_HANDLE)
+		{
+			pipelineRenderingCI.colorAttachmentCount = 1;
+			pipelineRenderingCI.pColorAttachmentFormats = &config.ColorAttachmentFormat;
+		}
+		else
+		{
+			pipelineRenderingCI.colorAttachmentCount = 0; // 陰影管線無顏色輸出
+		}
+		if (config.EnableDepthTest || config.FragmentShader == VK_NULL_HANDLE)
+		{
+			pipelineRenderingCI.depthAttachmentFormat = config.DepthAttachmentFormat;
+		}
+		else
+		{
+			pipelineRenderingCI.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+		}
+
+		// 總裝管線
+		VkGraphicsPipelineCreateInfo pipelineInfo{};
+		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineInfo.pStages = shaderStages.data();
+		pipelineInfo.pVertexInputState = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssembly;
+		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pDepthStencilState = &depthStencil;
+		pipelineInfo.pColorBlendState = &colorBlending;
+		pipelineInfo.pDynamicState = &dynamicState;
+		pipelineInfo.layout = _global_pipeline_layout;
+		pipelineInfo.pNext = &pipelineRenderingCI; // 1.3 核心：串接動態渲染格式
+		pipelineInfo.renderPass = VK_NULL_HANDLE;  // 不需要傳入實體 RenderPass
+
+		VkPipeline graphicsPipeline;
+		if (VkResult result = vkCreateGraphicsPipelines(_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create graphics pipeline! VkResult: {}.", static_cast<int32_t>(result)));
+			return VK_NULL_HANDLE;
+		}
+
+		return graphicsPipeline;
+	}
+
+	VkShaderModule IVulkanBase::CreateShaderMoudle(const std::string& path)
+	{
+		std::vector<char> shaderCode;
+		if (!IEngineTools::ReadFile(path, shaderCode))
+		{
+			return VK_NULL_HANDLE;
+		}
+
+		VkShaderModuleCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		createInfo.codeSize = shaderCode.size();
+		createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
+
+		VkShaderModule shaderMoudle;
+		if (VkResult result = vkCreateShaderModule(_device, &createInfo, nullptr, &shaderMoudle))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create a shader module! VkResult: {}.", static_cast<int32_t>(result)));
+			return VK_NULL_HANDLE;
+		}
+
+		return shaderMoudle;
+	}
+
+	void IVulkanBase::DestroyShaderMoudle(VkShaderModule shader_moudle)
+	{
+		if (shader_moudle != VK_NULL_HANDLE)
+			vkDestroyShaderModule(_device, shader_moudle, nullptr);
+	}
+
+	void IVulkanBase::UpdateBindlessTextureSlot(uint32_t slot_id, VkImageView texture_image_view)
+	{
+		if (slot_id == 0 ||
+			slot_id >= _current_descriptor_count ||
+			texture_image_view == VK_NULL_HANDLE)
+			return;
+
+		VkDescriptorImageInfo imageInfo{};
+		imageInfo.imageView = texture_image_view;
+		imageInfo.sampler = VK_NULL_HANDLE;
+		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		VkWriteDescriptorSet textureWrite{};
+		textureWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		textureWrite.dstSet = _global_bindless_descriptor_set;
+		textureWrite.dstBinding = 1;
+		textureWrite.dstArrayElement = slot_id;
+		textureWrite.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		textureWrite.descriptorCount = 1;
+		textureWrite.pImageInfo = &imageInfo;
+
+		vkUpdateDescriptorSets(_device, 1, &textureWrite, 0, nullptr);
+	}
+
+	bool IVulkanBase::CreateSyncObjects(std::vector<VkFence>& frameFence, std::vector<VkSemaphore>& acquireSemaphores, std::vector<VkSemaphore>& submitSemaphores)
+	{
+		VkSemaphoreCreateInfo semaphoreInfo{};
+		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+		VkFenceCreateInfo fenceInfo{};
+		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // 初始状态为已信号，避免第一次等待时死锁
+
+		frameFence.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
+		for (std::uint32_t i = 0; i < IVulkan::MAX_FRAMES_IN_FLIGHT; ++i)
+		{
+			if (VkResult result = vkCreateFence(_device, &fenceInfo, nullptr, &frameFence[i]))
+			{
+				INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create fences! VkResult: {}.", static_cast<int32_t>(result)));
+				return false;
+			}
+		}
+		acquireSemaphores.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
+		for (std::uint32_t i = 0; i < IVulkan::MAX_FRAMES_IN_FLIGHT; ++i)
+		{
+			if (VkResult result = vkCreateSemaphore(_device, &semaphoreInfo, nullptr, &acquireSemaphores[i]))
+			{
+				INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create _acquire_semaphores! VkResult: {}.", static_cast<int32_t>(result)));
+				return false;
+			}
+		}
+		submitSemaphores.resize(_swap_chain_image_count);
+		for (std::uint32_t i = 0; i < _swap_chain_image_count; ++i)
+		{
+			if (VkResult result = vkCreateSemaphore(_device, &semaphoreInfo, nullptr, &submitSemaphores[i]))
+			{
+				INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create _submit_semaphores! VkResult: {}.", static_cast<int32_t>(result)));
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool IVulkanBase::CreateCommandBuffers(std::vector<VkCommandBuffer>& buffers)
+	{
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.commandPool = _command_pool;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandBufferCount = IVulkan::MAX_FRAMES_IN_FLIGHT;
+
+		buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
+		if (VkResult result = vkAllocateCommandBuffers(_device, &allocInfo, buffers.data()))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to allocate command buffers!	VkResult: {}.", static_cast<int32_t>(result)));
+			return false;
+		}
+
+		return true;
+	}
+
+	bool IVulkanBase::ResizeBindlessDescriptorPoolAndGobalSet()
+	{
+		if (_current_descriptor_count == _absolute_descriptor_limit)
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] 当前 bindless descriptor pool 无法扩容，因为已经达到了上限: {}.", _absolute_descriptor_limit));
+			return false;
+		}
+		uint32_t newDescriptorCount = std::min(_current_descriptor_count * 2, _absolute_descriptor_limit);
+		INVENT_LOG_INFO(std::format("[ VulkanBase ] Resize current descriptor count : {}.", newDescriptorCount));
+
+		VkDescriptorPoolSize poolSizes[1];
+		poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		poolSizes[0].descriptorCount = newDescriptorCount;
+
+		VkDescriptorPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		poolInfo.pNext = nullptr;
+		poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+		poolInfo.maxSets = 1;
+		poolInfo.poolSizeCount = 1;
+		poolInfo.pPoolSizes = poolSizes;
+
+		VkDescriptorPool newPool;
+		if (VkResult result = vkCreateDescriptorPool(_device, &poolInfo, nullptr, &newPool))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create new descriptor pool! VkResult: {}.", static_cast<int32_t>(result)));
+			return false;
+		}
+
+		VkDescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo{};
+		variableCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+		variableCountInfo.descriptorSetCount = 1;
+		variableCountInfo.pDescriptorCounts = &newDescriptorCount;
+
+		VkDescriptorSetAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocInfo.descriptorPool = newPool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &_descriptor_set_layouts[1]; // set1Layout (Bindless)
+		allocInfo.pNext = &variableCountInfo;
+
+		VkDescriptorSet newDescriptorSet;
+		if (VkResult result = vkAllocateDescriptorSets(_device, &allocInfo, &newDescriptorSet))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create new global descriptor set! VkResult: {}.", static_cast<int32_t>(result)));
+			return false;
+		}
+
+		VkCopyDescriptorSet copyInfo{};
+		copyInfo.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
+		copyInfo.pNext = nullptr;
+		copyInfo.srcSet = _global_bindless_descriptor_set;
+		copyInfo.srcBinding = 1;             // 你的 Bindless 綁定點
+		copyInfo.srcArrayElement = 0;
+		copyInfo.dstSet = newDescriptorSet;
+		copyInfo.dstBinding = 1;             // 新集的綁定點
+		copyInfo.dstArrayElement = 0;
+		copyInfo.descriptorCount = _current_descriptor_count; // 複製舊有的數量
+
+		vkUpdateDescriptorSets(_device, 0, nullptr, 1, &copyInfo);
+
+		if (_bindless_descriptor_pool != VK_NULL_HANDLE)
+		{
+			// 注意：確保 GPU 此時沒有在使用舊的 descriptor set！
+			vkDestroyDescriptorPool(_device, _bindless_descriptor_pool, nullptr);
+		}
+
+		_bindless_descriptor_pool = newPool;
+		_global_bindless_descriptor_set = newDescriptorSet;
+		_current_descriptor_count = newDescriptorCount;
+
+		return true;
+	}
+
+	VkCommandBuffer IVulkanBase::BeginSingleTimeCommands()
+	{
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandPool = _command_pool;
+		allocInfo.commandBufferCount = 1;
+
+		VkCommandBuffer commandBuffer;
+		vkAllocateCommandBuffers(_device, &allocInfo, &commandBuffer);
+
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+		vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+		return commandBuffer;
+	}
+
+	void IVulkanBase::EndSingleTimeCommands(VkCommandBuffer command_buffer)
+	{
+		vkEndCommandBuffer(command_buffer);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &command_buffer;
+
+		vkQueueSubmit(_graphics_queue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(_graphics_queue);
+
+		vkFreeCommandBuffers(_device, _command_pool, 1, &command_buffer);
 	}
 
 	bool IVulkanBase::UseVmaCreateBuffer(VkDeviceSize size,
