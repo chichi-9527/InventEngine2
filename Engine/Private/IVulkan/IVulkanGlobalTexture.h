@@ -2,6 +2,7 @@
 
 #include "IBitArray.h"
 
+#include <cstdint>
 #include <string>
 #include <mutex>
 #include <cmath>
@@ -23,10 +24,38 @@ namespace INVENT
 
 	class IVulkanTexture2DManagement
 	{
+	public:
+		struct Texture2DHandle
+		{
+			IHandle handle{};
+			std::uint64_t version{ 0 };
+
+			Texture2DHandle() = default;
+			constexpr Texture2DHandle(size_t h)
+				: handle(h){}
+			constexpr Texture2DHandle(size_t h, std::uint32_t v)
+				: handle(h), version(v) {}
+			Texture2DHandle(const Texture2DHandle&) = default;
+			Texture2DHandle(Texture2DHandle&&) noexcept = default;
+
+			Texture2DHandle& operator=(const Texture2DHandle&) = default;
+			Texture2DHandle& operator=(Texture2DHandle&&) noexcept = default;
+
+			friend bool operator==(const Texture2DHandle& handle1, const Texture2DHandle& handle2)
+			{
+				return handle1.handle == handle2.handle &&
+					handle1.version == handle2.version;
+			}
+
+			bool IsValid() const noexcept { return handle.IsValid(); }
+		};
+	private:
+
 		struct IVulkanTexture2DHandle
 		{
 			VkImageView ImageView = VK_NULL_HANDLE;
 			VkImage Image = VK_NULL_HANDLE;
+			std::uint64_t Version{ 0 };
 
 			IVulkanTexture2DHandle() = default;
 			IVulkanTexture2DHandle(const std::pair<VkImage, VkImageView>& v)
@@ -43,6 +72,17 @@ namespace INVENT
 				ImageView = v.second;
 				return *this;
 			}
+			IVulkanTexture2DHandle& operator++()
+			{
+				++Version;
+				return *this;
+			}
+			IVulkanTexture2DHandle operator++(int)
+			{
+				IVulkanTexture2DHandle old = *this;
+				++(*this);
+				return old;
+			}
 
 			bool IsVaild() const noexcept
 			{
@@ -52,17 +92,15 @@ namespace INVENT
 		};
 
 		using TextureNameMap = std::unordered_map < std::string,
-			IHandle,
+			Texture2DHandle,
 			std::hash<std::string>,
 			std::equal_to<std::string>,
-			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::string, IHandle>>>;
+			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::string, Texture2DHandle>>>;
 
 
 		IVulkanTexture2DManagement();
 	public:
 		~IVulkanTexture2DManagement();
-
-		using Texture2DHandle = IHandle;
 
 		static IVulkanTexture2DManagement& Instance();
 		void Clear();
@@ -72,17 +110,20 @@ namespace INVENT
 		static constexpr Texture2DHandle GetNormalPixel() noexcept { return 2; }
 
 		Texture2DHandle AllocateTextureHandle();
+		/// <returns> 失败时会返回无效的句柄 </returns>
 		Texture2DHandle AddTexture2D(const std::string& path, TextureType texture_type = TextureType::TYPE_Undefined);
+		/// <returns> 失败时会返回无效的句柄 </returns>
 		Texture2DHandle AddTexture2D(const std::string& name, const std::string& path, TextureType texture_type = TextureType::TYPE_Undefined);
+		/// <returns> 失败时会返回无效的句柄 </returns>
 		Texture2DHandle AddTexture2D(const std::string& name, VkImage image, VkImageView image_view);
-		void UpateTexture2D(const Texture2DHandle& hanlde, const std::string& path);
+		void UpdateTexture2D(const Texture2DHandle& hanlde, const std::string& path);
 		// 自动销毁 VkImage 与 VkImageView
-		void UpateTexture2D(const Texture2DHandle& hanlde, VkImage image, VkImageView image_view);
+		void UpdateTexture2D(const Texture2DHandle& hanlde, VkImage image, VkImageView image_view);
 		// 不自动销毁 VkImage 与 VkImageView
-		void UpateTexture2DWithoutDestory(const Texture2DHandle& hanlde, VkImage image, VkImageView image_view);
+		void UpdateTexture2DWithoutDestory(const Texture2DHandle& hanlde, VkImage image, VkImageView image_view);
 
 		bool IsTextureReady(const Texture2DHandle& handle) const;
-		bool IsVaild() const { return _is_vaild; }
+		bool IsValid() const { return _is_valid; }
 
 		const IVulkanTexture2DHandle& GetVulkanTextureHanlde(const Texture2DHandle& handle) const;
 		IVulkanTexture2DHandle& GetVulkanTextureHanlde(const Texture2DHandle& handle);
@@ -106,7 +147,7 @@ namespace INVENT
 			uint32_t level_count = 1,
 			VkDeviceSize buffer_offset = 0);
 
-		const IHandle& _find_handle_from_cache(const std::string& name) const;
+		const Texture2DHandle _find_handle_from_cache(const std::string& name) const;
 		uint32_t _calculate_level_count(const int& width, const int& height) const
 		{
 			return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
@@ -115,12 +156,12 @@ namespace INVENT
 	private:
 		std::vector<IVulkanTexture2DHandle> _textures;
 		IBitVector _bit_vector_used;
-		IBitVector _bit_vector_vaild;
+		IBitVector _bit_vector_valid;
 		std::mutex _bits_vaild_mutex;
 
 		TextureNameMap* _texture_name_cache = nullptr;
 
-		bool _is_vaild = false;
+		bool _is_valid = false;
 
 	};
 }
