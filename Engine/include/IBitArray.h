@@ -59,7 +59,7 @@ namespace INVENT
 			return BitSetIndex * 64 + BitIndex;
 		}
 
-		bool IsVaild() const noexcept
+		bool IsValid() const noexcept
 		{
 			return BitSetIndex != MaxSizeTValue &&
 				BitIndex < 64;
@@ -189,11 +189,32 @@ namespace INVENT
 				for (size_t i = 0; i < 64; ++i)
 				{
 					bool bitValue = (data & std::uint64_t{ 1 }) != 0;
-					std::invoke(std::forward<Func>(func), index, bitValue);
+					std::invoke(func, index, bitValue);
 
 					data >>= 1;
 					++index;
 				}
+			}
+		}
+
+		// 快速遍历所有位为 1 的索引
+		template<typename Func>
+			requires std::invocable<Func, size_t>
+		void FastForEachOne(Func&& func) const
+		{
+			size_t baseIndex = 0;
+			for (const auto& bitSet : _array)
+			{
+				std::uint64_t data = bitSet.Data;
+
+				while (data != 0)
+				{
+					int trailingZeros = std::countr_zero(data);
+					std::invoke(func, baseIndex + trailingZeros);
+					data &= (data - 1);
+				}
+
+				baseIndex += 64;
 			}
 		}
 
@@ -290,11 +311,32 @@ namespace INVENT
 				for (size_t i = 0; i < 64; ++i)
 				{
 					bool bitValue = (data & std::uint64_t{ 1 }) != 0;
-					std::invoke(std::forward<Func>(func), index, bitValue);
+					std::invoke(func, index, bitValue);
 
 					data >>= 1;
 					++index;
 				}
+			}
+		}
+
+		// 快速遍历所有位为 1 的索引
+		template<typename Func>
+			requires std::invocable<Func, size_t>
+		void FastForEachOne(Func&& func) const
+		{
+			size_t baseIndex = 0;
+			for (const auto& bitSet : _vector)
+			{
+				std::uint64_t data = bitSet.Data;
+
+				while (data != 0)
+				{
+					int trailingZeros = std::countr_zero(data);
+					std::invoke(func, baseIndex + trailingZeros);
+					data &= (data - 1);
+				}
+
+				baseIndex += 64;
 			}
 		}
 
