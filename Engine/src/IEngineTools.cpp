@@ -1,6 +1,7 @@
 ﻿#include "IEngineTools.h"
 
 #include "ILog.h"
+#include "IThread/IThreadPool.h"
 
 #include <fstream>
 
@@ -42,6 +43,43 @@ namespace INVENT
 	{
 		static IEngineTools t;
 		return t;
+	}
+
+	void IEngineTools::Init()
+	{
+		_init_threadpools();
+		_init_mem_pools();
+	}
+	void IEngineTools::Clear()
+	{
+		_clear_threadpools();
+		_clear_mem_pools();
+	}
+
+	void IEngineTools::_init_threadpools()
+	{
+		_work_thread_pool = new IThreadPool(2, 1);
+		_work_thread_pool->Start();
+	}
+
+	void IEngineTools::_clear_threadpools()
+	{
+		if (_work_thread_pool)
+		{
+			_work_thread_pool->Shutdown();
+			delete _work_thread_pool;
+			_work_thread_pool = nullptr;
+		}
+	}
+
+	void IEngineTools::_init_mem_pools()
+	{
+		_gobal_memory_pool = IMemPool::CreatePool();
+	}
+
+	void IEngineTools::_clear_mem_pools()
+	{
+		IMemPool::DestroyPool(_gobal_memory_pool);
 	}
 
 }
