@@ -13,6 +13,7 @@
 #include <limits>
 #include <atomic>
 #include <mutex>
+#include <shared_mutex>
 
 namespace INVENT
 {
