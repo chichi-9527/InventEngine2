@@ -2,6 +2,7 @@
 
 #include "ILog.h"
 #include "IVulkan/VulkanBase.h"
+#include "IVulkan/IVulkanRenderer.h"
 
 namespace INVENT
 {
@@ -18,6 +19,13 @@ namespace INVENT
 		{
 			return false;
 		}
+		if (!IVulkanRenderer::Init())
+		{
+			INVENT_LOG_ERROR("[IRenderThread] Init Vulkan renderer error.");
+			return false;
+		}
+
+		return true;
 	}
 
 	void IRenderThread::Shutdown()
@@ -53,8 +61,10 @@ namespace INVENT
 			!IVulkanBase::Base().CreateVmaAllocator() ||
 			!IVulkanBase::Base().FindDepthFormat() ||
 			!IVulkanBase::Base().InitializeAllOffscreenPasses() ||
+			!IVulkanBase::Base().InitDescriptorCounts() ||
 			!IVulkanBase::Base().CreateGlobalPipelineLayout() ||
 			!IVulkanBase::Base().CreateBindlessDescriptorPool() ||
+			!IVulkanBase::Base().CreateOtherDsecriptorPools() ||
 			!IVulkanBase::Base().AllocaGlobalBindlessDescriptorSet() ||
 			!IVulkanBase::Base().CreateCommandPool())
 		{

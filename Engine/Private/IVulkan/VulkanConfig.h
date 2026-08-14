@@ -16,6 +16,7 @@ namespace IVulkan
 	constexpr std::uint32_t MAX_FRAMES_IN_FLIGHT = 2U;
 	constexpr std::uint32_t MAX_BINDLESS_TEXTURES = 500000U;
 	constexpr std::uint32_t DEF_BINDLESS_TEXTURES = 100000U;
+	constexpr std::uint32_t MAX_ALLOCATED_SETS = MAX_FRAMES_IN_FLIGHT;
 
 	struct PushConstants 
 	{

@@ -2,6 +2,7 @@
 
 #include "IVulkan/VulkanBase.h"
 #include "IEngineTools.h"
+#include "IVulkan/IVulkanGlobalTexture.h"
 
 #include <filesystem>
 
@@ -12,7 +13,15 @@ namespace INVENT
 
 	bool IVulkanRenderer::Init()
 	{
-
+		if (!_init_pipelines())
+		{
+			return false;
+		}
+		if (!IVulkanTexture2DManagement::Instance().IsValid())
+		{
+			return false;
+		}
+		return true;
 	}
 
 	void IVulkanRenderer::Shutdown()

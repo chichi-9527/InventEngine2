@@ -13,7 +13,7 @@ namespace INVENT
 		static void Shutdown();
 
 	private:
-		bool _init_pipelines();
+		static bool _init_pipelines();
 
 	private:
 
