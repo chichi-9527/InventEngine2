@@ -66,7 +66,9 @@ namespace INVENT
 		bool CreateVmaAllocator();
 		bool FindDepthFormat();
 		bool InitializeAllOffscreenPasses();
+		bool InitDescriptorCounts();
 		bool CreateBindlessDescriptorPool();
+		bool CreateOtherDsecriptorPools();
 		bool CreateGlobalPipelineLayout();
 		bool AllocaGlobalBindlessDescriptorSet();
 		bool CreateCommandPool();
@@ -177,6 +179,7 @@ namespace INVENT
 		VkSwapchainKHR _swap_chain = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT _debug_messenger = VK_NULL_HANDLE;
 		VkDescriptorPool _bindless_descriptor_pool = VK_NULL_HANDLE;
+		VkDescriptorPool _other_descriptor_pool = VK_NULL_HANDLE;
 		VkPipelineLayout _global_pipeline_layout = VK_NULL_HANDLE;
 		std::vector<VkDescriptorSetLayout> _descriptor_set_layouts;
 		VkDescriptorSet  _global_bindless_descriptor_set = VK_NULL_HANDLE;

@@ -249,6 +249,7 @@ namespace INVENT
 		feat12.runtimeDescriptorArray = VK_TRUE; // 運行時描述符陣列
 		feat12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE; // 非均勻索引
 		feat12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE; // 綁定後更新
+		feat12.descriptorBindingVariableDescriptorCount = VK_TRUE;
 		feat12.bufferDeviceAddress = VK_TRUE; // 开启Buffer设备地址
 		feat12.pNext = &features13;
 
@@ -264,12 +265,7 @@ namespace INVENT
 		deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 		deviceCreateInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
 		deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
-#ifdef VULKAN_VALITADION_LAYER
-		deviceCreateInfo.enabledLayerCount = (uint32_t)validationLayers.size();
-		deviceCreateInfo.ppEnabledLayerNames = validationLayers.data();
-#else
 		deviceCreateInfo.enabledLayerCount = 0;
-#endif // VULKAN_VALITADION_LAYER
 		deviceCreateInfo.pNext = &feat11;
 
 		if (VkResult result = vkCreateDevice(_physical_device, &deviceCreateInfo, nullptr, &_device))
@@ -433,29 +429,70 @@ namespace INVENT
 		return true;
 	}
 
-	bool IVulkanBase::CreateBindlessDescriptorPool()
+	bool IVulkanBase::InitDescriptorCounts()
 	{
 		_absolute_descriptor_limit = std::min({ IVulkan::MAX_BINDLESS_TEXTURES,
 			_descriptor_indexing_properties.maxDescriptorSetUpdateAfterBindSampledImages,
 			_descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages });
 		INVENT_LOG_INFO(std::format("[VulkanBase] Absolute descriptor count : {}.", _absolute_descriptor_limit));
 		_current_descriptor_count = std::min(IVulkan::DEF_BINDLESS_TEXTURES, _absolute_descriptor_limit);
+		return true;
+	}
 
-		VkDescriptorPoolSize poolSizes[1];
-		poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		poolSizes[0].descriptorCount = _current_descriptor_count;
+	bool IVulkanBase::CreateBindlessDescriptorPool()
+	{
+		VkDescriptorPoolSize poolSizes[2];
+		// binding 0 為全域採樣器提供空間
+		poolSizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLER;
+		poolSizes[0].descriptorCount = 10;
+		// 為 binding 1 的 Bindless 貼圖大陣列提供空間
+		poolSizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		poolSizes[1].descriptorCount = _current_descriptor_count;
 
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.pNext = nullptr;
 		poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 		poolInfo.maxSets = 1;
-		poolInfo.poolSizeCount = 1;
+		poolInfo.poolSizeCount = 2;
 		poolInfo.pPoolSizes = poolSizes;
 
 		if (VkResult result = vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_bindless_descriptor_pool))
 		{
-			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create descriptor pool! VkResult: {).", static_cast<int32_t>(result)));
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create descriptor pool! VkResult: {}.", static_cast<int32_t>(result)));
+			return false;
+		}
+
+		return true;
+	}
+
+	bool IVulkanBase::CreateOtherDsecriptorPools()
+	{
+		std::vector<VkDescriptorPoolSize> poolSizes{};
+		// 1. 為 Set 0 binding 0 的全域鏡頭 Uniform Buffer (ubo) 規劃空間
+		VkDescriptorPoolSize uboPoolSize{};
+		uboPoolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		uboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS; // 每幀需要 1 個，總共需要 maxAllocatedSets 個
+		poolSizes.push_back(uboPoolSize);
+
+		// 2. 為 Set 0 binding 1 的全域點光源 Storage Buffer (point light ssbo) 規劃空間
+		VkDescriptorPoolSize ssboPoolSize{};
+		ssboPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		ssboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS; // 每幀需要 1 個，總共需要 maxAllocatedSets 個
+		poolSizes.push_back(ssboPoolSize);
+
+		VkDescriptorPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		poolInfo.pNext = nullptr;
+		poolInfo.flags = 0; // 全域 UBO/SSBO 在錄製前即確定，不需要 UPDATE_AFTER_BIND_BIT
+		poolInfo.maxSets = IVulkan::MAX_ALLOCATED_SETS; // 這個 Pool 剛好只夠分配每幀所需的 Set 0 數量
+		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+		poolInfo.pPoolSizes = poolSizes.data();
+
+		// 建立 _other_descriptor_pool
+		if (VkResult result = vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_other_descriptor_pool))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create other descriptor pool! VkResult: {}.", static_cast<int32_t>(result)));
 			return false;
 		}
 
@@ -497,7 +534,7 @@ namespace INVENT
 		VkDescriptorSetLayoutBinding textureListLayoutBinding{};
 		textureListLayoutBinding.binding = 1;
 		textureListLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		textureListLayoutBinding.descriptorCount = _current_descriptor_count;
+		textureListLayoutBinding.descriptorCount = _absolute_descriptor_limit;
 		textureListLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		textureListLayoutBinding.pImmutableSamplers = nullptr;
 		std::vector<VkDescriptorSetLayoutBinding> set1Bindings = {
