@@ -60,6 +60,7 @@ namespace INVENT
 
 		// init log
 		ILog::_logs.resize(ILog::_log_queue_size);
+		ILog::_logs_to_file.resize(ILog::_log_queue_size);
 
 		ILog::_work_thread = std::jthread{ ILog::_process_logs };
 
@@ -85,50 +86,50 @@ namespace INVENT
 	}
 	void ILog::Info(const std::string& log)
 	{
-		std::string formattedLog = std::format("{}[{}][{}]:{}{}\n",
-			out_color_green, ILog::_get_current_time(), "INFO", log, out_color_reset);
+		std::string formattedLog = std::format("[{}][{}]:{}",
+			ILog::_get_current_time(), "INFO", log);
 
-		ILog::_add_log(formattedLog);
+		ILog::_add_log(formattedLog, out_color_green, out_color_reset);
 	}
 
 	void ILog::Warning(const std::string & log)
 	{
-		std::string formattedLog = std::format("{}[{}][{}]:{}{}\n",
-			out_color_yellow, ILog::_get_current_time(), "WARNING", log, out_color_reset);
+		std::string formattedLog = std::format("[{}][{}]:{}",
+			ILog::_get_current_time(), "WARNING", log);
 
-		ILog::_add_log(formattedLog);
+		ILog::_add_log(formattedLog, out_color_yellow, out_color_reset);
 	}
 
 	void ILog::Debug(const std::string & log)
 	{
-		std::string formattedLog = std::format("{}[{}][{}]:{}{}\n",
-			out_color_blue, ILog::_get_current_time(), "DEBUG", log, out_color_reset);
+		std::string formattedLog = std::format("[{}][{}]:{}",
+			ILog::_get_current_time(), "DEBUG", log);
 
-		ILog::_add_log(formattedLog);
+		ILog::_add_log(formattedLog, out_color_blue, out_color_reset);
 	}
 
 	void ILog::Error(const std::string & log)
 	{
-		std::string formattedLog = std::format("{}[{}][{}]:{}{}\n",
-			out_color_red, ILog::_get_current_time(), "ERROR", log, out_color_reset);
+		std::string formattedLog = std::format("[{}][{}]:{}",
+			ILog::_get_current_time(), "ERROR", log);
 
-		ILog::_add_log(formattedLog);
+		ILog::_add_log(formattedLog, out_color_red, out_color_reset);
 	}
 
 	void ILog::Trace(const std::string & log)
 	{
-		std::string formattedLog = std::format("{}[{}][{}]:{}{}\n",
-			out_color_cyan, ILog::_get_current_time(), "TRACE", log, out_color_reset);
+		std::string formattedLog = std::format("[{}][{}]:{}",
+			ILog::_get_current_time(), "TRACE", log);
 
-		ILog::_add_log(formattedLog);
+		ILog::_add_log(formattedLog, out_color_cyan, out_color_reset);
 	}
 
 	void ILog::Fatal(const std::string & log)
 	{
-		std::string formattedLog = std::format("{}[{}][{}]:{}{}\n",
-			out_color_magenta, ILog::_get_current_time(), "FATAL", log, out_color_reset);
+		std::string formattedLog = std::format("[{}][{}]:{}",
+			ILog::_get_current_time(), "FATAL", log);
 
-		ILog::_add_log(formattedLog);
+		ILog::_add_log(formattedLog, out_color_magenta, out_color_reset);
 	}
 
 	std::string ILog::_get_current_time()
@@ -173,10 +174,11 @@ namespace INVENT
 		while (currentStart != currentEnd)
 		{
 			const auto& logMsg = _logs[currentStart];
+			const auto& logMsgToFile = _logs_to_file[currentStart];
 			std::cout << logMsg;
 			if (ILog::_write_file && out.is_open())
 			{
-				out << logMsg;
+				out << logMsgToFile;
 			}
 			currentStart = (currentStart + 1) % _log_queue_size;
 		}
@@ -192,21 +194,24 @@ namespace INVENT
 			size_t oldSize = _log_queue_size;
 			_log_queue_size *= 2;
 			std::vector<std::string> newLogs(_log_queue_size);
+			std::vector<std::string> newLogsToFile(_log_queue_size);
 			size_t i = 0;
 			uint64_t s = _log_start.load();
 			uint64_t e = _log_end.load();
 			while (s != e)
 			{
 				newLogs[i++] = std::move(_logs[s]);
+				newLogsToFile[i++] = std::move(_logs_to_file[s]);
 				s = (s + 1) % oldSize;
 			}
 			_logs = std::move(newLogs);
+			_logs_to_file = std::move(newLogsToFile);
 			_log_start.store(0, std::memory_order_release);
 			_log_end.store(i, std::memory_order_release);
 		}
 	}
 
-	void ILog::_add_log(std::string& final_log)
+	void ILog::_add_log(std::string& final_log, const char* op, const char* ed)
 	{
 		while (true)
 		{
@@ -222,7 +227,8 @@ namespace INVENT
 			}
 			if (_log_end.compare_exchange_weak(currentEnd, nextEnd, std::memory_order_release, std::memory_order_relaxed))
 			{
-				_logs[currentEnd] = std::move(final_log);
+				_logs[currentEnd] =  std::format("{}{}{}\n", op, final_log, ed);
+				_logs_to_file[currentEnd] = std::format("{}\n", final_log);
 				break;
 			}
 		}
@@ -231,6 +237,7 @@ namespace INVENT
 			_notifier.notify_one();
 		}
 	}
+
 }
 
 void INVENT_DLL InventLogInit(const char* file_path, const char* file_name)

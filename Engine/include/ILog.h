@@ -36,9 +36,10 @@ namespace INVENT
 		static void _process_logs(std::stop_token stop_token);
 		static void _flush_queue();
 		static void _resize_queue();
-		static void _add_log(std::string& final_log);
+		static void _add_log(std::string& final_log, const char* op, const char* ed);
 	private:
 		static inline std::vector<std::string> _logs;
+		static inline std::vector<std::string> _logs_to_file;
 		static inline std::atomic_uint64_t _log_start{ 0 };
 		static inline std::atomic_uint64_t _log_end{ 0 };
 		static inline size_t _log_queue_size{ 100 };
