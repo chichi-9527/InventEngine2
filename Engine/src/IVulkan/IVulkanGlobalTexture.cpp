@@ -69,15 +69,15 @@ namespace INVENT
 		_bit_vector_valid.ResetBitToZero();
 	}
 
-	IVulkan::Texture2DHandle IVulkanTexture2DManagement::AllocateTextureHandle()
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AllocateTextureHandle()
 	{
-		IVulkan::Texture2DHandle handle;
+		Texture2DHandle handle;
 		handle.handle = _bit_vector_used.FindFirstZero();
 		if (!handle.handle.IsValid())
 		{
 			if (!IVulkanBase::Base().ResizeBindlessDescriptorPoolAndGobalSet())
 			{
-				return IVulkan::Texture2DHandle();
+				return Texture2DHandle();
 			}
 
 			_update_texture_count();
@@ -96,7 +96,7 @@ namespace INVENT
 		return handle;
 	}
 
-	IVulkan::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& path,
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& path,
 		TextureType texture_type,
 		bool is_create_mipmaps)
 	{
@@ -113,12 +113,12 @@ namespace INVENT
 		return AddTexture2D(name, path, texture_type, is_create_mipmaps);
 	}
 
-	IVulkan::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name,
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name,
 		const std::string& path,
 		TextureType texture_type,
 		bool is_create_mipmaps)
 	{
-		IVulkan::Texture2DHandle handle = _find_handle_from_cache(name);
+		Texture2DHandle handle = _find_handle_from_cache(name);
 		if (handle.IsValid())
 			return handle;
 		handle = AllocateTextureHandle();
@@ -209,12 +209,12 @@ namespace INVENT
 		return handle;
 	}
 
-	IVulkan::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name,
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name,
 		VkImage image, VkImageView image_view,
 		std::uint32_t width, std::uint32_t height, std::uint32_t mip_levels,
 		VkFormat format)
 	{
-		IVulkan::Texture2DHandle handle = _find_handle_from_cache(name);
+		Texture2DHandle handle = _find_handle_from_cache(name);
 		if (handle.IsValid())
 			return handle;
 		handle = AllocateTextureHandle();
@@ -237,11 +237,11 @@ namespace INVENT
 		return handle;
 	}
 
-	IVulkan::Texture2DHandle IVulkanTexture2DManagement::UpdateTexture2D(IVulkan::Texture2DHandle& handle,
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::UpdateTexture2D(Texture2DHandle& handle,
 		const std::string& path, TextureType texture_type,
 		bool is_create_mipmaps)
 	{
-		if (!handle.IsValid()) return IVulkan::Texture2DHandle{};
+		if (!handle.IsValid()) return Texture2DHandle{};
 
 		
 		size_t index = handle.handle.GetRealIndex();
@@ -354,12 +354,12 @@ namespace INVENT
 		return handle;
 	}
 
-	IVulkan::Texture2DHandle IVulkanTexture2DManagement::UpdateTexture2D(IVulkan::Texture2DHandle & handle,
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::UpdateTexture2D(Texture2DHandle & handle,
 		VkImage image, VkImageView image_view,
 		std::uint32_t width, std::uint32_t height, std::uint32_t mip_levels,
 		VkFormat format)
 	{
-		if (!handle.IsValid()) return IVulkan::Texture2DHandle{};
+		if (!handle.IsValid()) return Texture2DHandle{};
 		auto& slot = _textures[handle.handle.GetRealIndex()];
 		VkImage oldImage = slot.Image;
 		VkImageView oldImageView = slot.ImageView;
@@ -378,12 +378,12 @@ namespace INVENT
 		return handle;
 	}
 
-	IVulkan::Texture2DHandle IVulkanTexture2DManagement::UpdateTexture2DWithoutDestory(IVulkan::Texture2DHandle & handle,
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::UpdateTexture2DWithoutDestory(Texture2DHandle & handle,
 		VkImage image, VkImageView image_view,
 		std::uint32_t width, std::uint32_t height, std::uint32_t mip_levels,
 		VkFormat format)
 	{
-		if (!handle.IsValid()) return IVulkan::Texture2DHandle{};
+		if (!handle.IsValid()) return Texture2DHandle{};
 		{
 			std::unique_lock lock(_textures_mutex);
 			auto& slot = _textures[handle.handle.GetRealIndex()];
@@ -403,7 +403,7 @@ namespace INVENT
 		return handle;
 	}
 
-	void IVulkanTexture2DManagement::DestroyTexture2D(IVulkan::Texture2DHandle& handle)
+	void IVulkanTexture2DManagement::DestroyTexture2D(Texture2DHandle& handle)
 	{
 		if (!handle.IsValid()) return;
 		const size_t index = handle.handle.GetRealIndex();
@@ -423,14 +423,14 @@ namespace INVENT
 		handle = {};
 	}
 
-	bool IVulkanTexture2DManagement::IsTextureReady(const IVulkan::Texture2DHandle & handle) const
+	bool IVulkanTexture2DManagement::IsTextureReady(const Texture2DHandle & handle) const
 	{
 		if (!handle.IsValid()) return false;
 		return _bit_vector_valid[handle.handle.BitSetIndex][handle.handle.BitIndex];
 	}
 
 	IVulkanTexture2DManagement::IVulkanTexture2DHandle 
-		IVulkanTexture2DManagement::GetVulkanTextureHandle(const IVulkan::Texture2DHandle& handle) const
+		IVulkanTexture2DManagement::GetVulkanTextureHandle(const Texture2DHandle& handle) const
 	{
 		if (!handle.IsValid()) throw std::runtime_error("[GetVulkanTextureHandle] handle is not valid!");
 		size_t index = handle.handle.GetRealIndex();
@@ -591,21 +591,21 @@ namespace INVENT
 		_texture_name_cache = new TextureNameMap(64,
 			std::hash<std::string>(),
 			std::equal_to<std::string>(),
-			IMemPoolAllocatorOnlyFixedBlock< std::pair<const std::string, IVulkan::Texture2DHandle>>(IEngineTools::Instance().GetMemPoolPool()));
+			IMemPoolAllocatorOnlyFixedBlock< std::pair<const std::string, Texture2DHandle>>(IEngineTools::Instance().GetMemPoolPool()));
 		_texture_handle_name_cache = new TextureHandleNameMap(64,
 			std::hash<size_t>(),
 			std::equal_to<size_t>(),
 			IMemPoolAllocatorOnlyFixedBlock<std::pair<const size_t, std::string>>(IEngineTools::Instance().GetMemPoolPool()));
 	}
 
-	void IVulkanTexture2DManagement::_insert_name_cache(const std::string& name, IVulkan::Texture2DHandle handle)
+	void IVulkanTexture2DManagement::_insert_name_cache(const std::string& name, Texture2DHandle handle)
 	{
 		std::unique_lock<std::shared_mutex> lock(_cache_mutex);
 		_texture_name_cache->insert({ name, handle });
 		_texture_handle_name_cache->insert({ handle.handle.GetRealIndex(), name });
 	}
 
-	void IVulkanTexture2DManagement::_remove_name_cache_by_handle(const IVulkan::Texture2DHandle& handle)
+	void IVulkanTexture2DManagement::_remove_name_cache_by_handle(const Texture2DHandle& handle)
 	{
 		if (!handle.IsValid())
 			return;
@@ -778,14 +778,14 @@ namespace INVENT
 		IVulkanBase::Base().EndSingleTimeCommands(cmd);
 	}
 
-	const IVulkan::Texture2DHandle IVulkanTexture2DManagement::_find_handle_from_cache(const std::string& name) const
+	const IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::_find_handle_from_cache(const std::string& name) const
 	{
 		auto iter = _texture_name_cache->find(name);
 		if (iter != _texture_name_cache->end())
 		{
 			return iter->second;
 		}
-		return IVulkan::Texture2DHandle();
+		return Texture2DHandle();
 	}
 
 }
