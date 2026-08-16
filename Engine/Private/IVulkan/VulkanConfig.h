@@ -20,8 +20,9 @@ namespace IVulkan
 
 	struct PushConstants 
 	{
-		VkDeviceAddress VertexAddress{}; // 顶点起始指针
-		VkDeviceAddress MaterualAddress{}; // 材质起始指针
+		VkDeviceAddress VertexAddress{ 0 };		// 顶点起始指针
+		VkDeviceAddress MaterualAddress{ 0 };	// 材质起始指针
+		VkDeviceAddress IndexAddress{ 0 };		// 顶点索引起始指针
 		glm::mat4 MVP;
 	};
 
