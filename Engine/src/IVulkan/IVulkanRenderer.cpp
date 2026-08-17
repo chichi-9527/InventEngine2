@@ -13,10 +13,10 @@ namespace INVENT
 
 	bool IVulkanRenderer::Init()
 	{
-		if (!_init_pipelines())
+		/*if (!_init_pipelines())
 		{
 			return false;
-		}
+		}*/
 		if (!IVulkanTexture2DManagement::Instance().IsValid())
 		{
 			return false;
@@ -26,7 +26,7 @@ namespace INVENT
 
 	void IVulkanRenderer::Shutdown()
 	{
-
+		IVulkanTexture2DManagement::Instance().Clear();
 	}
 
 	bool IVulkanRenderer::_init_pipelines()

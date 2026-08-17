@@ -18,6 +18,10 @@ namespace IVulkan
 	constexpr std::uint32_t DEF_BINDLESS_TEXTURES = 100000U;
 	constexpr std::uint32_t MAX_ALLOCATED_SETS = MAX_FRAMES_IN_FLIGHT;
 
+	static VkDeviceSize TotalVRAM{ 0 };
+	// 计算出的各种 buffer 的总大小(B) ,总显存(TotalVRAM)的 70%
+	static VkDeviceSize MaxBufferSize{ 0 };
+
 	struct PushConstants 
 	{
 		VkDeviceAddress VertexAddress{ 0 };		// 顶点起始指针

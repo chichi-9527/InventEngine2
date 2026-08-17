@@ -15,6 +15,7 @@ namespace INVENT
 	IVulkanTexture2DManagement::IVulkanTexture2DManagement()
 	{
 		auto textureCount = static_cast<size_t>(IVulkanBase::Base().GetCurrentBindlessDescriptorCount());
+		INVENT_LOG_INFO(std::format("[IVulkanTexture2DManagement] current bindless descriptor count: {}.", textureCount));
 
 		_textures.resize(textureCount, IVulkanTexture2DHandle());
 		_bit_vector_used.ResizeBitCount(textureCount);
@@ -28,7 +29,7 @@ namespace INVENT
 
 	IVulkanTexture2DManagement::~IVulkanTexture2DManagement()
 	{
-		Clear();
+		//Clear();
 		if (_texture_name_cache)
 		{
 			delete _texture_name_cache;
@@ -49,19 +50,18 @@ namespace INVENT
 
 	void IVulkanTexture2DManagement::Clear()
 	{
-		_bit_vector_used.ForEach([this](size_t index, bool bit_value) {
-			if (bit_value)
+		_bit_vector_used.FastForEachOne([this](size_t index) {
+
+			auto& tex = _textures[index];
+			if (tex.ImageView != VK_NULL_HANDLE)
 			{
-				auto& tex = _textures[index];
-				if (tex.ImageView != VK_NULL_HANDLE)
-				{
-					IVulkanBase::Base().DestroyImageView(tex.ImageView);
-				}
-				if (tex.Image != VK_NULL_HANDLE)
-				{
-					IVulkanBase::Base().UseVmaDestroyImage(tex.Image);
-				}
+				IVulkanBase::Base().DestroyImageView(tex.ImageView);
 			}
+			if (tex.Image != VK_NULL_HANDLE)
+			{
+				IVulkanBase::Base().UseVmaDestroyImage(tex.Image);
+			}
+
 			});
 		_texture_name_cache->clear();
 		_texture_handle_name_cache->clear();
@@ -621,6 +621,7 @@ namespace INVENT
 	void IVulkanTexture2DManagement::_update_texture_count()
 	{
 		auto textureCount = static_cast<size_t>(IVulkanBase::Base().GetCurrentBindlessDescriptorCount());
+		INVENT_LOG_INFO(std::format("[IVulkanTexture2DManagement] updated! current bindless descriptor count: {}.", textureCount));
 		_bit_vector_used.ResizeBitCount(textureCount);
 		_bit_vector_valid.ResizeBitCount(textureCount);
 		_textures.resize(textureCount, IVulkanTexture2DHandle());

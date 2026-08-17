@@ -11,6 +11,15 @@ namespace INVENT
 		return e;
 	}
 
+	void IEngine::Init()
+	{
+		IEngineTools::Instance().Init();
+	}
+	void IEngine::Shutdown()
+	{
+		IEngineTools::Instance().Clear();
+	}
+
 	const char* IEngine::GetRunPath() const noexcept
 	{
 		return IEngineTools::GetRunPath().c_str();

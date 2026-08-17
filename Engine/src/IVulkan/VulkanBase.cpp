@@ -213,9 +213,9 @@ namespace INVENT
 			return false;
 		}
 
-		_get_descriptor_indexing_properties();
-
+		INVENT_LOG_INFO("[VulkanBase] pick physical devic done.");
 		INVENT_LOG_INFO(std::format("[VulkanBase] device name : {}.", _physical_device_properties.deviceName));
+		_get_all_properties();
 		INVENT_LOG_INFO(std::format("[VulkanBase] device maximum number of sampled image descriptors : {}.", _descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages));
 
 		return true;
@@ -478,7 +478,7 @@ namespace INVENT
 		// 2. 為 Set 0 binding 1 的全域點光源 Storage Buffer (point light ssbo) 規劃空間
 		VkDescriptorPoolSize ssboPoolSize{};
 		ssboPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		ssboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS; // 每幀需要 1 個，總共需要 maxAllocatedSets 個
+		ssboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS * 3; // 每幀需要 3 個
 		poolSizes.push_back(ssboPoolSize);
 
 		VkDescriptorPoolCreateInfo poolInfo{};
@@ -1291,13 +1291,25 @@ namespace INVENT
 		return allRequiredSupported;
 	}
 
-	void IVulkanBase::_get_descriptor_indexing_properties()
+	void IVulkanBase::_get_all_properties()
 	{
 		_descriptor_indexing_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
 		VkPhysicalDeviceProperties2 deviceProps2{};
 		deviceProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
 		deviceProps2.pNext = &_descriptor_indexing_properties;
 		vkGetPhysicalDeviceProperties2(_physical_device, &deviceProps2);
+		vkGetPhysicalDeviceMemoryProperties(_physical_device, &_physical_device_memory_properties);
+
+		// 计算显存
+		for (uint32_t i = 0; i < _physical_device_memory_properties.memoryHeapCount; ++i)
+		{
+			if (_physical_device_memory_properties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+				IVulkan::TotalVRAM += _physical_device_memory_properties.memoryHeaps[i].size;
+		}
+		INVENT_LOG_INFO(std::format("[VulkanBase] TotalVRAM: {} GB.", static_cast<double>(IVulkan::TotalVRAM) / (1024 * 1024 * 1024)));
+		IVulkan::MaxBufferSize = static_cast<VkDeviceSize>(IVulkan::TotalVRAM * 0.7);
+		INVENT_LOG_INFO(std::format("[VulkanBase] MaxBufferSize: {} MB.", static_cast<uint64_t>(IVulkan::MaxBufferSize / (1024 * 1024))));
+
 	}
 
 	VkSurfaceFormatKHR IVulkanBase::_choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR>& available_formats)

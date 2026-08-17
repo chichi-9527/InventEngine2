@@ -5,6 +5,7 @@
 #include <ILog.h>
 #include <IGameModule.h>
 #include <IRenderThreadBase.h>
+#include <IEngine.h>
 
 #include <filesystem>
 #include <chrono>
@@ -50,6 +51,7 @@ namespace Editor
 
 bool EditorWindow::Start()
 {
+    INVENT::IEngine::Instatnce().Init();
     //
     if (!GetGameProjects())
     {
@@ -107,6 +109,8 @@ bool EditorWindow::Start()
     End();
     UnLoadGame();
 //#endif
+
+    INVENT::IEngine::Instatnce().Shutdown();
     return true;
 }
 

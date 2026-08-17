@@ -156,7 +156,7 @@ namespace INVENT
 		QueueFamilyIndices _find_queue_families(VkPhysicalDevice device);
 		SwapChainSupportDetails _query_swap_chain_support(VkPhysicalDevice device);
 		bool _check_device_extension_support(VkPhysicalDevice device);
-		void _get_descriptor_indexing_properties();
+		void _get_all_properties();
 		VkSurfaceFormatKHR _choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR>& available_formats);
 		VkPresentModeKHR _choose_swap_presenta_mode(const std::vector<VkPresentModeKHR>& available_present_modes, VkPresentModeKHR mode = VK_PRESENT_MODE_MAILBOX_KHR);
 		VkExtent2D _choose_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities);
@@ -188,6 +188,7 @@ namespace INVENT
 		VkPhysicalDeviceDescriptorIndexingProperties _descriptor_indexing_properties{};
 		VkPhysicalDeviceDescriptorIndexingFeaturesEXT _enabled_indexing_features{};
 		VkPhysicalDeviceProperties _physical_device_properties{};
+		VkPhysicalDeviceMemoryProperties _physical_device_memory_properties{};
 
 		std::vector<VkImage> _swap_chain_images;
 		std::vector<VkImageView> _swap_chain_image_views;
