@@ -22,6 +22,11 @@ namespace IVulkan
 	// 计算出的各种 buffer 的总大小(B) ,总显存(TotalVRAM)的 70%
 	static VkDeviceSize MaxBufferSize{ 0 };
 
+	struct InstanceData 
+	{
+
+	};
+
 	struct PushConstants 
 	{
 		VkDeviceAddress VertexAddress{ 0 };		// 顶点起始指针

@@ -516,9 +516,24 @@ namespace INVENT
 		pointLightSSBOLayoutBinding.descriptorCount = 1;
 		pointLightSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pointLightSSBOLayoutBinding.pImmutableSamplers = nullptr;
+		// binding 2 : 全場景物體實例總表 SSBO (存放所有 IVulkan::InstanceData)
+		VkDescriptorSetLayoutBinding instanceDataSSBOLayoutBinding{};
+		instanceDataSSBOLayoutBinding.binding = 2;
+		instanceDataSSBOLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		instanceDataSSBOLayoutBinding.descriptorCount = 1;
+		instanceDataSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // 頂點和計算著色器都需要
+
+		// binding 3 : 間接繪製命令緩衝區 SSBO (Compute 寫入，Render 讀取)
+		VkDescriptorSetLayoutBinding indirectCommandSSBOLayoutBinding{};
+		indirectCommandSSBOLayoutBinding.binding = 3;
+		indirectCommandSSBOLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		indirectCommandSSBOLayoutBinding.descriptorCount = 1;
+		indirectCommandSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT; // 主要由 Compute Shader 寫入
 		std::vector<VkDescriptorSetLayoutBinding> set0Bindings = {
 			uboLayoutBinding,
-			pointLightSSBOLayoutBinding
+			pointLightSSBOLayoutBinding,
+			instanceDataSSBOLayoutBinding,
+			indirectCommandSSBOLayoutBinding
 		};
 		auto set0Layout = _create_descriptor_set_layout(set0Bindings);
 
