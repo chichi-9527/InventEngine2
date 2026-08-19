@@ -75,6 +75,10 @@ namespace INVENT
 
 		// tools
 
+		/// <param name="descriptor_set"> 分配的描述符 (out) </param>
+		/// <param name="layout_index"> 布局编号; 例如 ubo 在 layout 0 </param>
+		/// <returns></returns>
+		VkResult AllocateDescriptSetFromOtherDescriptorPools(VkDescriptorSet& descriptor_set, size_t layout_index = 0);
 		enum class ModelBlendMode
 		{
 			Opaque,       // 不透明（開啟深度寫入，關閉混合）
@@ -149,6 +153,7 @@ namespace INVENT
 		VkSwapchainKHR GetSwapChain() const { return _swap_chain; }
 		const VkPhysicalDeviceProperties& GetPhysicalDeviceProperties() const { return _physical_device_properties; }
 		uint32_t GetCurrentBindlessDescriptorCount() const { return _current_descriptor_count; }
+		VkPipelineLayout GetVkPipelineLayout() const { return _global_pipeline_layout; }
 		const std::uint32_t GetAPIVersion() const noexcept { return _api_version; }
 		bool Version_1_3_OrHigher() const noexcept { return _api_version >= VK_API_VERSION_1_3; }
 	private:

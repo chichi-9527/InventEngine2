@@ -32,7 +32,7 @@ namespace IVulkan
 
 	struct UBO 
 	{
-
+		glm::mat4 VP{ 1.0f };
 	};
 
 	struct PointLight

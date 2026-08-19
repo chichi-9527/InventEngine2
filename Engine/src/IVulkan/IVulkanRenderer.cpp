@@ -26,8 +26,14 @@ namespace INVENT
 
 	void IVulkanRenderer::Shutdown()
 	{
+		_clear();
 		IVulkanTexture2DManagement::Instance().Clear();
 		IVulkanTexture2DManagement::Instance().Terminate();
+	}
+
+	void IVulkanRenderer::RenderFrame(std::uint32_t frameindex)
+	{
+		
 	}
 
 	bool IVulkanRenderer::_init_pipelines()
@@ -52,5 +58,10 @@ namespace INVENT
 		IVulkanBase::Base().DestroyShaderMoudle(mainMeshFS); mainMeshFS = VK_NULL_HANDLE;
 
 		return true;
+	}
+
+	void IVulkanRenderer::_clear()
+	{
+		
 	}
 }

@@ -624,6 +624,17 @@ namespace INVENT
 		return true;
 	}
 
+	VkResult IVulkanBase::AllocateDescriptSetFromOtherDescriptorPools(VkDescriptorSet& descriptor_set, size_t layout_index)
+	{
+		VkDescriptorSetAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocInfo.descriptorPool = _other_descriptor_pool;
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = &_descriptor_set_layouts[layout_index];
+
+		return vkAllocateDescriptorSets(_device, &allocInfo, &descriptor_set);
+	}
+
 	VkPipeline IVulkanBase::CreateGraphicsPipeline(const GraphicsPipelineConfig& config)
 	{
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
