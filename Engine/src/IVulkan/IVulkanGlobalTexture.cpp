@@ -29,17 +29,6 @@ namespace INVENT
 
 	IVulkanTexture2DManagement::~IVulkanTexture2DManagement()
 	{
-		//Clear();
-		if (_texture_name_cache)
-		{
-			delete _texture_name_cache;
-			_texture_name_cache = nullptr;
-		}
-		if (_texture_handle_name_cache)
-		{
-			delete _texture_handle_name_cache;
-			_texture_handle_name_cache = nullptr;
-		}
 	}
 
 	IVulkanTexture2DManagement& IVulkanTexture2DManagement::Instance()
@@ -67,6 +56,20 @@ namespace INVENT
 		_texture_handle_name_cache->clear();
 		_bit_vector_used.ResetBitToZero();
 		_bit_vector_valid.ResetBitToZero();
+	}
+
+	void IVulkanTexture2DManagement::Terminate()
+	{
+		if (_texture_name_cache)
+		{
+			delete _texture_name_cache;
+			_texture_name_cache = nullptr;
+		}
+		if (_texture_handle_name_cache)
+		{
+			delete _texture_handle_name_cache;
+			_texture_handle_name_cache = nullptr;
+		}
 	}
 
 	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AllocateTextureHandle()

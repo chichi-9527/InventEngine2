@@ -30,6 +30,7 @@ namespace INVENT
 
 	void IRenderThread::Shutdown()
 	{
+		IVulkanRenderer::Shutdown();
 		INVENT_LOG_INFO("[IRenderThread] shutdown.");
 	}
 

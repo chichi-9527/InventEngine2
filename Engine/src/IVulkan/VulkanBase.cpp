@@ -1324,7 +1324,11 @@ namespace INVENT
 		INVENT_LOG_INFO(std::format("[VulkanBase] TotalVRAM: {} GB.", static_cast<double>(IVulkan::TotalVRAM) / (1024 * 1024 * 1024)));
 		IVulkan::MaxBufferSize = static_cast<VkDeviceSize>(IVulkan::TotalVRAM * 0.7);
 		INVENT_LOG_INFO(std::format("[VulkanBase] MaxBufferSize: {} MB.", static_cast<uint64_t>(IVulkan::MaxBufferSize / (1024 * 1024))));
-
+		// 计算缓冲区限制
+		IVulkan::MaxUBORange = _physical_device_properties.limits.maxUniformBufferRange;
+		INVENT_LOG_INFO(std::format("[VulkanBase] MaxUBORange: {} B.", static_cast<uint64_t>(IVulkan::MaxUBORange)));
+		IVulkan::MaxSSBORange = _physical_device_properties.limits.maxStorageBufferRange;
+		INVENT_LOG_INFO(std::format("[VulkanBase] MaxSSBORange: {} MB.", static_cast<uint64_t>(IVulkan::MaxSSBORange / (1024 * 1024))));
 	}
 
 	VkSurfaceFormatKHR IVulkanBase::_choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR>& available_formats)

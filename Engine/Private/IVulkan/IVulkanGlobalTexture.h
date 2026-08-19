@@ -149,7 +149,11 @@ namespace INVENT
 		~IVulkanTexture2DManagement();
 
 		static IVulkanTexture2DManagement& Instance();
+		// 清除所有标识符，释放所有 VkImage/VkImageView
 		void Clear();
+		// 释放 CPU 内存，必须先调用 Clear 否则会造成 GPU 内存泄露
+		// 在调用 IEngine::Shutdown() 之前调用
+		void Terminate();
 
 		static constexpr Texture2DHandle GetWhitePixel() noexcept { return 0; }
 		static constexpr Texture2DHandle GetBlackPixel() noexcept { return 1; }

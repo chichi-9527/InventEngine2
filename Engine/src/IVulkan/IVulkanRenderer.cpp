@@ -27,6 +27,7 @@ namespace INVENT
 	void IVulkanRenderer::Shutdown()
 	{
 		IVulkanTexture2DManagement::Instance().Clear();
+		IVulkanTexture2DManagement::Instance().Terminate();
 	}
 
 	bool IVulkanRenderer::_init_pipelines()
