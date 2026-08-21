@@ -225,6 +225,12 @@ namespace INVENT
 			return IBitSet64{ _data[n].Data.load(std::memory_order_relaxed) };
 		}
 
+		bool Get(IHandle handle) const
+		{
+			std::shared_lock<std::shared_mutex> lock(_rw_mutex);
+			return IBitSet64{ _data[handle.BitSetIndex].Data.load(std::memory_order_relaxed) }[handle.BitIndex];
+		}
+
 		template<bool V>
 		void SetValue(size_t arr_index, size_t bit_index)
 		{
@@ -382,7 +388,10 @@ namespace INVENT
 				auto newBlockNum = _capacity_blocks;
 				while (newBlockNum < arr_size)
 				{
-					newBlockNum *= 2;
+					if (newBlockNum < 16384)
+						newBlockNum *= 2;
+					else
+						newBlockNum += 16384;
 				}
 				if (newBlockNum > _capacity_blocks)
 				{
