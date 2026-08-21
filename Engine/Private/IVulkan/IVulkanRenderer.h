@@ -20,6 +20,9 @@ namespace INVENT
 
 	private:
 		static bool _init_pipelines();
+		static bool _init_descriptor_sets();
+		static bool _init_buffers();
+		static bool _init_frames();
 		static void _clear();
 
 	private:
@@ -38,6 +41,11 @@ namespace INVENT
 		inline static std::vector<VkDescriptorSet> _point_light_ssbo;
 		inline static std::vector<VkDescriptorSet> _instance_ssbo;
 		inline static std::vector<VkDescriptorSet> _out_instance_ssbo;
+
+		inline static std::vector<VkBuffer> _ubo_buffers;
+		inline static std::vector<VkBuffer> _point_light_buffers;
+		inline static VkBuffer _instance_buffer;
+		inline static std::vector<VkBuffer> _out_instance_buffers;
 
 		inline static std::uint32_t _image_index{ 0 };
 	};
