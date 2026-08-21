@@ -2,6 +2,7 @@
 
 #include "EngineConfig.h"
 #include <vulkan/vulkan.h>
+#include <vma/vk_mem_alloc.h>
 
 #include <cstdint>
 #include <vector>
@@ -119,11 +120,18 @@ namespace INVENT
 		void EndSingleTimeCommands(VkCommandBuffer command_buffer);
 
 		// use vma
+		/*
+		* 0															純 GPU 存取
+		* VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT	每影格更新
+		* VMA_ALLOCATION_CREATE_MAPPED_BIT							一創建完就能直接用指針寫入資料
+		* VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT				需要拉回 CPU 處理的場景
+		*/
 
 		bool UseVmaCreateBuffer(VkDeviceSize size,
 			VkBufferUsageFlags usage,
-			VkMemoryPropertyFlags properties,
-			VkBuffer& buffer);
+			VmaAllocationCreateFlags vma_flags,
+			VkBuffer& buffer,
+			void** out_mapped_data = nullptr);
 		void UseVmaDestroyBuffer(VkBuffer buffer);
 		bool UseVmaCreateImage(uint32_t width,
 			uint32_t height,
@@ -131,9 +139,12 @@ namespace INVENT
 			VkFormat format,
 			VkImageTiling tiling,
 			VkImageUsageFlags usage,
-			VkMemoryPropertyFlags properties,
-			VkImage& image);
+			VmaAllocationCreateFlags vma_flags,
+			VkImage& image,
+			void** out_mapped_data = nullptr);
 		void UseVmaDestroyImage(VkImage image);
+		bool UseVmaFlushAllocationBuffer(VkBuffer buffer);
+		bool UseVmaFlushAllocationImage(VkImage buffer);
 		VkImageView CreateImageView(VkImage image,
 			VkFormat format,
 			VkImageAspectFlags aspect_flags,

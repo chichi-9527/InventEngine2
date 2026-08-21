@@ -1013,8 +1013,9 @@ namespace INVENT
 
 	bool IVulkanBase::UseVmaCreateBuffer(VkDeviceSize size,
 		VkBufferUsageFlags usage,
-		VkMemoryPropertyFlags properties,
-		VkBuffer& buffer)
+		VmaAllocationCreateFlags vma_flags,
+		VkBuffer& buffer,
+		void** out_mapped_data)
 	{
 		VkBufferCreateInfo bufferInfo{};
 		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1022,21 +1023,23 @@ namespace INVENT
 		bufferInfo.usage = usage;
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-		VmaAllocationCreateInfo vmaAllocInfo{};
-		vmaAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-		if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-		{
-			vmaAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-		}
-
+		VmaAllocationCreateInfo vmaAllocCreateInfo{};
+		vmaAllocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
+		vmaAllocCreateInfo.flags = vma_flags;
+		
 		VmaAllocation allocation;
-		if (VkResult result = vmaCreateBuffer(vmaAllocator, &bufferInfo, &vmaAllocInfo, &buffer, &allocation, nullptr))
+		VmaAllocationInfo vmaAllocInfo{};
+		if (VkResult result = vmaCreateBuffer(vmaAllocator, &bufferInfo, &vmaAllocCreateInfo, &buffer, &allocation, &vmaAllocInfo))
 		{
 			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create buffer! VkBufferUsageFlags : {}, VkResult: {}.", static_cast<int32_t>(usage), static_cast<int32_t>(result)));
 			return false;
 		}
 
 		MapBufferAllocation[buffer] = allocation;
+		if (out_mapped_data && (vma_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT))
+		{
+			*out_mapped_data = vmaAllocInfo.pMappedData;
+		}
 
 		return true;
 	}
@@ -1055,8 +1058,9 @@ namespace INVENT
 		VkFormat format,
 		VkImageTiling tiling,
 		VkImageUsageFlags usage,
-		VkMemoryPropertyFlags properties,
-		VkImage & image)
+		VmaAllocationCreateFlags vma_flags,
+		VkImage & image,
+		void** out_mapped_data)
 	{
 		VkImageCreateInfo imageInfo{};
 		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -1075,21 +1079,23 @@ namespace INVENT
 		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 		imageInfo.flags = 0; // Optional
 
-		VmaAllocationCreateInfo vmaAllocInfo{};
-		vmaAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-		if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-		{
-			vmaAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-		}
+		VmaAllocationCreateInfo vmaAllocCreateInfo{};
+		vmaAllocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
+		vmaAllocCreateInfo.flags = vma_flags;
 
 		VmaAllocation allocation;
-		if (VkResult result = vmaCreateImage(vmaAllocator, &imageInfo, &vmaAllocInfo, &image, &allocation, nullptr))
+		VmaAllocationInfo vmaAllocInfo{};
+		if (VkResult result = vmaCreateImage(vmaAllocator, &imageInfo, &vmaAllocCreateInfo, &image, &allocation, &vmaAllocInfo))
 		{
 			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create image! VkResult: {}.", static_cast<int32_t>(result)));
 			return false;
 		}
 
 		MapImageAllocation[image] = allocation;
+		if (out_mapped_data && (vma_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT))
+		{
+			*out_mapped_data = vmaAllocInfo.pMappedData;
+		}
 
 		return true;
 	}
@@ -1100,6 +1106,34 @@ namespace INVENT
 		if (iter != MapImageAllocation.end())
 			vmaDestroyImage(vmaAllocator, image, iter->second);
 		MapImageAllocation.erase(image);
+	}
+
+	bool IVulkanBase::UseVmaFlushAllocationBuffer(VkBuffer buffer)
+	{
+		auto iter = MapBufferAllocation.find(buffer);
+		if (iter != MapBufferAllocation.end())
+		{
+			if (VkResult result = vmaFlushAllocation(vmaAllocator, iter->second, 0, VK_WHOLE_SIZE))
+			{
+				INVENT_LOG_FATAL("[VulkanBase] Failed to flush buffer allocation! ");
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool IVulkanBase::UseVmaFlushAllocationImage(VkImage buffer)
+	{
+		auto iter = MapImageAllocation.find(buffer);
+		if (iter != MapImageAllocation.end())
+		{
+			if (VkResult result = vmaFlushAllocation(vmaAllocator, iter->second, 0, VK_WHOLE_SIZE))
+			{
+				INVENT_LOG_FATAL("[VulkanBase] Failed to flush image allocation! ");
+				return false;
+			}
+		}
+		return true;
 	}
 
 	VkImageView IVulkanBase::CreateImageView(VkImage image,

@@ -149,19 +149,22 @@ namespace INVENT
 			VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
 
 			VkBuffer stagingBuffer;
+			void* data;
 			if (!IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
 				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-				stagingBuffer))
+				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+				stagingBuffer,
+				&data))
 			{
 				stbi_image_free(texData);
 				throw std::runtime_error(std::format("failed to load staging buffer! path : {}", path));
 			}
 
-			void* data;
-			IVulkanBase::Base().UseVmaMapMemory(stagingBuffer, data);
 			memcpy(data, texData, static_cast<size_t>(imageSize));
-			IVulkanBase::Base().UseVmaUnmapMemory(stagingBuffer);
+			if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
+			{
+				throw std::runtime_error("failed to flush buffer allocation!");
+			}
 
 			stbi_image_free(texData);
 
@@ -174,7 +177,7 @@ namespace INVENT
 				textureFormat,
 				VK_IMAGE_TILING_OPTIMAL,
 				VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // 生成 mipmap
-				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+				0,
 				image))
 			{
 				throw std::runtime_error(std::format("failed to create image! path : {}", path));
@@ -272,19 +275,23 @@ namespace INVENT
 			VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
 
 			VkBuffer stagingBuffer;
+			void* data;
 			if (!IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
 				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-				stagingBuffer))
+				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+				stagingBuffer,
+				&data))
 			{
 				stbi_image_free(texData);
 				throw std::runtime_error(std::format("failed to load staging buffer! path : {}", path));
 			}
 
-			void* data;
-			IVulkanBase::Base().UseVmaMapMemory(stagingBuffer, data);
 			memcpy(data, texData, static_cast<size_t>(imageSize));
-			IVulkanBase::Base().UseVmaUnmapMemory(stagingBuffer);
+			if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
+			{
+				throw std::runtime_error("failed to flush buffer allocation!");
+			}
+
 			stbi_image_free(texData);
 
 			if (reusable)
@@ -312,7 +319,7 @@ namespace INVENT
 					textureFormat,
 					VK_IMAGE_TILING_OPTIMAL,
 					VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // 生成 mipmap
-					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+					0,
 					newImage))
 				{
 					IVulkanBase::Base().UseVmaDestroyImage(newImage);
@@ -482,19 +489,22 @@ namespace INVENT
 		constexpr VkDeviceSize stagingBufferSize = DefaultSingleImageSize * 3;
 
 		VkBuffer stagingBuffer;
+		void* data;
 		if (!IVulkanBase::Base().UseVmaCreateBuffer(stagingBufferSize,
 			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			stagingBuffer))
+			VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+			stagingBuffer,
+			&data))
 		{
 			throw std::runtime_error("failed to load staging buffer! : _init_default_image");
 		}
 
-		void* data;
-		IVulkanBase::Base().UseVmaMapMemory(stagingBuffer, data);
 		uint32_t pixels[] = { whitePixel,blackPixel,normalPixel };
 		memcpy(data, pixels, static_cast<size_t>(stagingBufferSize));
-		IVulkanBase::Base().UseVmaUnmapMemory(stagingBuffer);
+		if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
+		{
+			throw std::runtime_error("failed to flush buffer allocation!");
+		}
 
 		// white
 		VkImage whiteImage;
@@ -504,7 +514,7 @@ namespace INVENT
 			VK_FORMAT_R8G8B8A8_SRGB,
 			VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			0,
 			whiteImage);
 		_upload_texture_and_generate_mipmaps(stagingBuffer,
 			whiteImage,
@@ -534,7 +544,7 @@ namespace INVENT
 			VK_FORMAT_R8G8B8A8_SRGB,
 			VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			0,
 			blackImage);
 		_upload_texture_and_generate_mipmaps(stagingBuffer,
 			blackImage,
@@ -564,7 +574,7 @@ namespace INVENT
 			VK_FORMAT_R8G8B8A8_UNORM,
 			VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			0,
 			normalImage);
 		_upload_texture_and_generate_mipmaps(stagingBuffer,
 			normalImage,
