@@ -18,6 +18,7 @@
 * 
 * 目前可用 STL 库（已验证）：
 * std::map
+* std::unoredered_map
 * 
 */
 
@@ -31,6 +32,7 @@
 #include <initializer_list>
 #include <array>
 #include <mutex>
+#include <shared_mutex>
 #include <new>
 #include <limits>
 #include <concepts>
@@ -52,9 +54,13 @@ namespace INVENT
 {
 
 	constexpr uint32_t GENERAL_POOL_BLOCK_SIZE = 4096;
+	constexpr uint32_t FIXED_POOL_MIN_BLOCK_SIZE = 16;
+	constexpr uint32_t FIXED_POOL_MAX_BLOCK_SIZE = 2048;
+	constexpr uint32_t FIXED_POOL_BUCKET_COUNT = 8;
 
 	class IMemPool;
 
+	// RelocCallBack 执行期间不得触碰全局池指针及全局池分配/释放。
 	template<typename T>
 	class IUserPtr
 	{
@@ -353,7 +359,6 @@ namespace INVENT
 		// can use count is count - 2
 		struct MemClassCounts
 		{
-			uint32_t BlockCountByte8 = 16384;
 			uint32_t BlockCountByte16 = 16384;
 			uint32_t BlockCountByte32 = 16384;
 			uint32_t BlockCountByte64 = 16384;
@@ -361,22 +366,22 @@ namespace INVENT
 			uint32_t BlockCountByte256 = 16384;
 			uint32_t BlockCountByte512 = 16384;
 			uint32_t BlockCountByte1024 = 16384;
+			uint32_t BlockCountByte2048 = 16384;
 
 			// default general pool block size = 4kb
 			uint32_t BlockCountGeneral = 16384;
 
 			MemClassCounts() = default;
-			constexpr MemClassCounts(uint32_t blockCountByte8,
-				uint32_t blockCountByte16,
+			constexpr MemClassCounts(uint32_t blockCountByte16,
 				uint32_t blockCountByte32,
 				uint32_t blockCountByte64,
 				uint32_t blockCountByte128,
 				uint32_t blockCountByte256,
 				uint32_t blockCountByte512,
 				uint32_t blockCountByte1024,
+				uint32_t blockCountByte2048,
 				uint32_t blockCountGeneral) noexcept
-				: BlockCountByte8(blockCountByte8)
-				, BlockCountByte16(blockCountByte16)
+				: BlockCountByte16(blockCountByte16)
 				, BlockCountByte32(blockCountByte32)
 				, BlockCountByte64(blockCountByte64)
 				, BlockCountByte128(blockCountByte128)
@@ -384,6 +389,7 @@ namespace INVENT
 				, BlockCountByte512(blockCountByte512)
 				, BlockCountByte1024(blockCountByte1024)
 				, BlockCountGeneral(blockCountGeneral)
+				, BlockCountByte2048(blockCountByte2048)
 			{}
 			MemClassCounts(const MemClassCounts&) = default;
 			MemClassCounts(MemClassCounts&&) noexcept = default;
@@ -393,7 +399,6 @@ namespace INVENT
 	private:
 		IMemPool(MemClassCounts _counts)
 			: _mem_class_counts(_counts)
-			, _block_byte8_ptr(nullptr)
 			, _block_byte16_ptr(nullptr)
 			, _block_byte32_ptr(nullptr)
 			, _block_byte64_ptr(nullptr)
@@ -401,6 +406,7 @@ namespace INVENT
 			, _block_byte256_ptr(nullptr)
 			, _block_byte512_ptr(nullptr)
 			, _block_byte1024_ptr(nullptr)
+			, _block_byte2048_ptr(nullptr)
 			, _block_general_ptr(nullptr)
 			, _general_pool_ptr(nullptr)
 			, _free_list_head_general(0)
@@ -416,7 +422,8 @@ namespace INVENT
 			IMemPool* pool = new IMemPool(_counts);
 
 			auto init_fixed_pool = [](void*& ptr, size_t blockNum, size_t blockSize) -> bool {
-				try { ptr = ::operator new(blockNum * blockSize); }
+				if (blockNum < 3) return false;
+				try { ptr = ::operator new(blockNum * blockSize, std::align_val_t{ blockSize }); }
 				catch (...) { return false; }
 				*reinterpret_cast<uint32_t*>(ptr) = 1;
 				for (size_t i = 1; i < blockNum - 2; ++i)
@@ -428,14 +435,14 @@ namespace INVENT
 				return true;
 				};
 
-			if (!init_fixed_pool(pool->_block_byte8_ptr, _counts.BlockCountByte8, 8) ||
-				!init_fixed_pool(pool->_block_byte16_ptr, _counts.BlockCountByte16, 16) ||
+			if (!init_fixed_pool(pool->_block_byte16_ptr, _counts.BlockCountByte16, 16) ||
 				!init_fixed_pool(pool->_block_byte32_ptr, _counts.BlockCountByte32, 32) ||
 				!init_fixed_pool(pool->_block_byte64_ptr, _counts.BlockCountByte64, 64) ||
 				!init_fixed_pool(pool->_block_byte128_ptr, _counts.BlockCountByte128, 128) ||
 				!init_fixed_pool(pool->_block_byte256_ptr, _counts.BlockCountByte256, 256) ||
 				!init_fixed_pool(pool->_block_byte512_ptr, _counts.BlockCountByte512, 512) ||
-				!init_fixed_pool(pool->_block_byte1024_ptr, _counts.BlockCountByte1024, 1024))
+				!init_fixed_pool(pool->_block_byte1024_ptr, _counts.BlockCountByte1024, 1024) ||
+				!init_fixed_pool(pool->_block_byte2048_ptr, _counts.BlockCountByte2048, 2048))
 			{
 				DestroyPool(pool);
 				return nullptr;
@@ -503,11 +510,10 @@ namespace INVENT
 				while (ptr)
 				{
 					nextPtr = *reinterpret_cast<void**>((std::byte*)ptr + (size_t)(count - 1) * size);
-					::operator delete(ptr);
+					::operator delete(ptr, std::align_val_t{ size });
 					ptr = nextPtr;
 				}
 				};
-			free_fixed_chain(pool->_block_byte8_ptr, pool->_mem_class_counts.BlockCountByte8, 8);
 			free_fixed_chain(pool->_block_byte16_ptr, pool->_mem_class_counts.BlockCountByte16, 16);
 			free_fixed_chain(pool->_block_byte32_ptr, pool->_mem_class_counts.BlockCountByte32, 32);
 			free_fixed_chain(pool->_block_byte64_ptr, pool->_mem_class_counts.BlockCountByte64, 64);
@@ -515,6 +521,7 @@ namespace INVENT
 			free_fixed_chain(pool->_block_byte256_ptr, pool->_mem_class_counts.BlockCountByte256, 256);
 			free_fixed_chain(pool->_block_byte512_ptr, pool->_mem_class_counts.BlockCountByte512, 512);
 			free_fixed_chain(pool->_block_byte1024_ptr, pool->_mem_class_counts.BlockCountByte1024, 1024);
+			free_fixed_chain(pool->_block_byte2048_ptr, pool->_mem_class_counts.BlockCountByte2048, 2048);
 			delete pool;
 
 		}
@@ -531,9 +538,11 @@ namespace INVENT
 			ClassName* resPtr = nullptr;
 			size_t usedNodeIndex = UINT32_MAX;
 
-			if (needByte > 1024)
+			if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
 				uint32_t needBlock = (uint32_t)((needByte + GENERAL_POOL_BLOCK_SIZE - 1) / GENERAL_POOL_BLOCK_SIZE);
+					
+				std::unique_lock<std::shared_mutex> lock(_general_mutex);
 				AllocOut out = _allocate_from_general_pool(needBlock);
 				if (out.UserPtr == nullptr)
 				{
@@ -583,6 +592,8 @@ namespace INVENT
 					_used_nodes[_used_list_head].PreNode = (uint32_t)usedNodeIndex;
 				}
 				_used_list_head = (uint32_t)usedNodeIndex;
+				// update block info
+				_block_info[out.StartIndex].UsedNodeIndex = (uint32_t)usedNodeIndex;
 
 				resPtr = (ClassName*)out.UserPtr;
 
@@ -612,11 +623,16 @@ namespace INVENT
 				for (uint32_t i = 0; i < constructed; ++i)
 					ptr[i].~ClassName();
 
+				if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
+				{
+					Deallocate<ClassName>(IUserPtr<ClassName>(usedNodeIndex, this), n);
+				}
+				Deallocate<ClassName>(IUserPtr<ClassName>(resPtr), n);
 				return IUserPtr<ClassName>();
 			}
 
 			// 返回封装好的 UserPtr
-			if (needByte > 1024)
+			if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
 				return IUserPtr<ClassName>((uint32_t)usedNodeIndex, this);
 			}
@@ -636,9 +652,11 @@ namespace INVENT
 			ClassName* resPtr = nullptr;
 			size_t usedNodeIndex = UINT32_MAX;
 
-			if (needByte > 1024)
+			if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
 				uint32_t needBlock = (uint32_t)((needByte + GENERAL_POOL_BLOCK_SIZE - 1) / GENERAL_POOL_BLOCK_SIZE);
+				
+				std::unique_lock<std::shared_mutex> lock(_general_mutex);
 				AllocOut out = _allocate_from_general_pool(needBlock);
 				if (out.UserPtr == nullptr)
 				{
@@ -686,9 +704,12 @@ namespace INVENT
 
 				if (_used_list_head != UINT32_MAX)
 				{
-					_used_nodes[_used_list_head].NextNode = usedNodeIndex;
+					_used_nodes[_used_list_head].PreNode = usedNodeIndex;
 				}
 				_used_list_head = usedNodeIndex;
+
+				// update block info
+				_block_info[out.StartIndex].UsedNodeIndex = (uint32_t)usedNodeIndex;
 
 				resPtr = (ClassName*)out.UserPtr;
 
@@ -722,11 +743,16 @@ namespace INVENT
 				for (uint32_t i = 0; i < constructed; ++i)
 					ptr[i].~ClassName();
 
+				if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
+				{
+					Deallocate<ClassName>(IUserPtr<ClassName>(usedNodeIndex, this), n);
+				}
+				Deallocate<ClassName>(IUserPtr<ClassName>(resPtr), n);
 				return IUserPtr<ClassName>();
 			}
 
 			// 返回封装好的 UserPtr
-			if (needByte > 1024)
+			if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
 				return IUserPtr<ClassName>(usedNodeIndex, this);
 			}
@@ -757,9 +783,9 @@ namespace INVENT
 
 		bool IsPtrInPool(void* ptr, size_t byte_count)
 		{
-			if (byte_count > 1024)
+			if (byte_count > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
-				std::lock_guard<std::mutex> lock(_general_mutex);
+				std::shared_lock<std::shared_mutex> lock(_general_mutex);
 				return (uint32_t)(((uintptr_t)ptr - (uintptr_t)_block_general_ptr) / GENERAL_POOL_BLOCK_SIZE) < _mem_class_counts.BlockCountGeneral;
 			}
 			size_t idx = _get_bucket_index(byte_count);
@@ -775,10 +801,11 @@ namespace INVENT
 
 			size_t needByte = (size_t)n * sizeof(T);
 
-			if (needByte > 1024)
+			if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
 				uint32_t needBlocks = (uint32_t)((needByte + GENERAL_POOL_BLOCK_SIZE - 1) / GENERAL_POOL_BLOCK_SIZE);
 
+				std::unique_lock<std::shared_mutex> lock(_general_mutex);
 				AllocOut out = _allocate_from_general_pool(needBlocks);
 				if (out.UserPtr == nullptr)
 				{
@@ -843,9 +870,9 @@ namespace INVENT
 
 			size_t usedByte = (size_t)n * sizeof(T);
 
-			if (usedByte > 1024)
+			if (usedByte > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
-				std::lock_guard<std::mutex> lock(_general_mutex);
+				std::unique_lock<std::shared_mutex> lock(_general_mutex);
 
 				uint32_t usedBlocks = (uint32_t)((usedByte + GENERAL_POOL_BLOCK_SIZE - 1) / GENERAL_POOL_BLOCK_SIZE);
 
@@ -870,37 +897,61 @@ namespace INVENT
 
 		}
 
-
-
-		void* ResolveGeneralPtr(uint32_t index) const
+		// 即对齐到 max(byte_size, 16) 向上取 2 的幂；需要 K 字节对齐时直接传 byte_size = K 即可。
+		// byte_size 为 0 或 > FIXED_POOL_MAX_BLOCK_SIZE 时返回 nullptr（不会回退到全局池）。
+		// 不调用构造函数；实际可用容量为所在桶的块大小。
+		[[nodiscard]] void* AllocateOnlyFixedWithAlignment(std::size_t byte_size)
 		{
-			if (index == UINT32_MAX || index >= _used_nodes.size()) [[unlikely]]
+			if (byte_size == 0 || byte_size > FIXED_POOL_MAX_BLOCK_SIZE)
 			{
 				return nullptr;
 			}
+			size_t idx = _get_bucket_index(byte_size);
+			return _take_block_fixed_size_pool(idx, _get_fixed_pool_head(idx), _get_fixed_block_size(idx), _get_fixed_block_count(idx));
+		}
+		// 必须传入正确的内存大小，否则会出现未定义错误
+		void DestroyOnlyFixed(void* ptr, std::size_t byte_size)
+		{
+			if (ptr == nullptr || byte_size == 0 || byte_size > FIXED_POOL_MAX_BLOCK_SIZE)
+			{
+				return;
+			}
+			size_t idx = _get_bucket_index(byte_size);
+			_put_back_block_fixed_size_pool(idx, ptr, *_get_fixed_pool_head(idx), _get_fixed_block_size(idx), _get_fixed_block_count(idx));
+		}
 
+		void* ResolveGeneralPtr(uint32_t index) const
+		{
+			if (index == UINT32_MAX)
+			{
+				return nullptr;
+			}
+			
+			std::shared_lock<std::shared_mutex> lock(_general_mutex);
+
+			if(index >= _used_nodes.size())
+			{
+				return nullptr;
+			}
 			return _used_nodes[index].UserPtr;
 		}
 
 		// test
 		void DefragmentGeneralPool()
 		{
-			std::lock_guard<std::mutex> lock(_general_mutex);
+			std::unique_lock<std::shared_mutex> lock(_general_mutex);
 			_defragment_general_pool();
 		}
 
 		bool RecreateGeneralPool(uint32_t new_block_count)
 		{
-			std::lock_guard<std::mutex> lock(_general_mutex);
+			std::unique_lock<std::shared_mutex> lock(_general_mutex);
 			return _recreate_general_pool(new_block_count);
 		}
 
 
 	private:
 
-		/// <summary>
-		/// 
-		/// </summary>
 		/// <param name="block_ptr"></param>
 		/// <param name="block_size"></param>
 		/// <param name="block_count"></param>
@@ -930,7 +981,7 @@ namespace INVENT
 			void* newPool = nullptr;
 			try
 			{
-				newPool = ::operator new((size_t)block_count * block_size);
+				newPool = ::operator new((size_t)block_count * block_size, std::align_val_t{ (size_t)block_size });
 			}
 			catch (const std::exception&)
 			{
@@ -1302,7 +1353,7 @@ namespace INVENT
 				}
 				else
 				{
-					++i;
+					i += _used_nodes[_block_info[i].UsedNodeIndex].UsedCount;
 				}
 			}
 		}
@@ -1413,7 +1464,7 @@ namespace INVENT
 				}
 				else
 				{
-					++idx;
+					idx += newUsedNodes[newBlockInfo[idx].UsedNodeIndex].UsedCount;
 				}
 			}
 
@@ -1438,37 +1489,37 @@ namespace INVENT
 
 		size_t _get_bucket_index(size_t byte_count) const
 		{
-			if (byte_count <= 8) return 0;
-			if (byte_count <= 16) return 1;
-			if (byte_count <= 32) return 2;
-			if (byte_count <= 64) return 3;
-			if (byte_count <= 128) return 4;
-			if (byte_count <= 256) return 5;
-			if (byte_count <= 512) return 6;
+			if (byte_count <= 16) return 0;
+			if (byte_count <= 32) return 1;
+			if (byte_count <= 64) return 2;
+			if (byte_count <= 128) return 3;
+			if (byte_count <= 256) return 4;
+			if (byte_count <= 512) return 5;
+			if (byte_count <= 1024) return 6;
 			return 7;
 		}
 
 		void** _get_fixed_pool_head(size_t idx)
 		{
-			std::array<void**, 8> heads = { &_block_byte8_ptr, &_block_byte16_ptr, &_block_byte32_ptr, &_block_byte64_ptr,
-											&_block_byte128_ptr, &_block_byte256_ptr, &_block_byte512_ptr, &_block_byte1024_ptr };
+			std::array<void**, 8> heads = { &_block_byte16_ptr, &_block_byte32_ptr, &_block_byte64_ptr, &_block_byte128_ptr,
+				&_block_byte256_ptr, &_block_byte512_ptr, &_block_byte1024_ptr, &_block_byte2048_ptr };
 			return heads[idx];
 		}
 
-		uint32_t _get_fixed_block_size(size_t idx) const { return 8 << idx; }
+		uint32_t _get_fixed_block_size(size_t idx) const { return FIXED_POOL_MIN_BLOCK_SIZE << idx; }
 
 		uint32_t _get_fixed_block_count(size_t idx) const
 		{
 			switch (idx)
 			{
-			case 0: return _mem_class_counts.BlockCountByte8;
-			case 1: return _mem_class_counts.BlockCountByte16;
-			case 2: return _mem_class_counts.BlockCountByte32;
-			case 3: return _mem_class_counts.BlockCountByte64;
-			case 4: return _mem_class_counts.BlockCountByte128;
-			case 5: return _mem_class_counts.BlockCountByte256;
-			case 6: return _mem_class_counts.BlockCountByte512;
-			case 7: return _mem_class_counts.BlockCountByte1024;
+			case 0: return _mem_class_counts.BlockCountByte16;
+			case 1: return _mem_class_counts.BlockCountByte32;
+			case 2: return _mem_class_counts.BlockCountByte64;
+			case 3: return _mem_class_counts.BlockCountByte128;
+			case 4: return _mem_class_counts.BlockCountByte256;
+			case 5: return _mem_class_counts.BlockCountByte512;
+			case 6: return _mem_class_counts.BlockCountByte1024;
+			case 7: return _mem_class_counts.BlockCountByte2048;
 			default: return 0;
 			}
 		}
@@ -1480,7 +1531,6 @@ namespace INVENT
 
 	private:
 
-		void* _block_byte8_ptr;
 		void* _block_byte16_ptr;
 		void* _block_byte32_ptr;
 		void* _block_byte64_ptr;
@@ -1488,6 +1538,7 @@ namespace INVENT
 		void* _block_byte256_ptr;
 		void* _block_byte512_ptr;
 		void* _block_byte1024_ptr;
+		void* _block_byte2048_ptr;
 		void* _block_general_ptr;
 
 		void* _general_pool_ptr;
@@ -1502,7 +1553,7 @@ namespace INVENT
 
 		// 多线程同步组件（按 Bin 维度细化，极低冲突率）
 		mutable std::array<std::mutex, 8> _fixed_mutexes;
-		mutable std::mutex _general_mutex;
+		mutable std::shared_mutex _general_mutex;
 
 	};
 
@@ -1582,7 +1633,7 @@ namespace INVENT
 #endif // INVENT_MEMORY_POOL_USE_IUSERPTR_IN_STL
 
 	
-	// 当分配小于等于 1024 字节时使用内存池分配，否则将使用默认分配器
+	// 当分配小于等于 2048 字节时使用内存池分配，否则将使用默认分配器
 	template<typename T>
 	class IMemPoolAllocatorOnlyFixedBlock
 	{
@@ -1617,7 +1668,7 @@ namespace INVENT
 				throw std::bad_alloc();
 			}
 
-			if (n > 0 && (n * sizeof(T) > 1024))
+			if (n > 0 && (n * sizeof(T) > FIXED_POOL_MAX_BLOCK_SIZE))
 			{
 				return std::allocator<T>{}.allocate(n);
 			}
@@ -1634,7 +1685,7 @@ namespace INVENT
 		void deallocate(T* p, std::size_t n) noexcept
 		{
 			if (!p) return;
-			if (n > 0 && (n * sizeof(T) > 1024))
+			if (n > 0 && (n * sizeof(T) > FIXED_POOL_MAX_BLOCK_SIZE))
 			{
 				std::allocator<T>{}.deallocate(p, n);
 			}

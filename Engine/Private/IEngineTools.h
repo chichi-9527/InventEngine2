@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "IMemPool/IMemPool.h"
 
 #include <string>
 #include <vector>
@@ -27,6 +26,7 @@ namespace INVENT
 		void Clear();
 
 		IThreadPool* GetWorkThreadPool() const { return _work_thread_pool; }
+		IThreadPool* GetAllocatorThreadPool() const { return _allocator_thread_pool; }
 		IMemPool* GetMemPoolPool() const { return _gobal_memory_pool; }
 
 	private:
@@ -37,6 +37,7 @@ namespace INVENT
 
 	private:
 		IThreadPool* _work_thread_pool = nullptr;
+		IThreadPool* _allocator_thread_pool = nullptr;
 		IMemPool* _gobal_memory_pool = nullptr;
 	};
 }

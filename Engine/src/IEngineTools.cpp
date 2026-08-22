@@ -2,6 +2,7 @@
 
 #include "ILog.h"
 #include "IThread/IThreadPool.h"
+#include "IMemPool/IMemPool.h"
 
 #include <fstream>
 
@@ -60,6 +61,8 @@ namespace INVENT
 	{
 		_work_thread_pool = new IThreadPool(2, 1);
 		_work_thread_pool->Start();
+		_allocator_thread_pool = new IThreadPool();
+		_allocator_thread_pool->Start();
 	}
 
 	void IEngineTools::_clear_threadpools()
@@ -69,6 +72,12 @@ namespace INVENT
 			_work_thread_pool->Shutdown();
 			delete _work_thread_pool;
 			_work_thread_pool = nullptr;
+		}
+		if (_allocator_thread_pool)
+		{
+			_allocator_thread_pool->Shutdown();
+			delete _allocator_thread_pool;
+			_allocator_thread_pool = nullptr;
 		}
 	}
 

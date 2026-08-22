@@ -6,6 +6,7 @@
 #include <IGameModule.h>
 #include <IRenderThreadBase.h>
 #include <IEngine.h>
+#include <Memory/Memory.h>
 
 #include <filesystem>
 #include <chrono>
@@ -52,6 +53,8 @@ namespace Editor
 bool EditorWindow::Start()
 {
     INVENT::IEngine::Instatnce().Init();
+    if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
+    void* test = INVENT::EngineAllocator::Allocate(8);
     //
     if (!GetGameProjects())
     {
@@ -110,6 +113,7 @@ bool EditorWindow::Start()
     UnLoadGame();
 //#endif
 
+    INVENT::EngineAllocator::Clear();
     INVENT::IEngine::Instatnce().Shutdown();
     return true;
 }
