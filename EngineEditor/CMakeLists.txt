@@ -87,6 +87,10 @@ add_custom_command(TARGET EngineEditor POST_BUILD
     "$<TARGET_FILE_DIR:EngineEditor>/slang.dll"
 
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${GLOBAL_VULKAN_SDK_BIN}/slangd.dll"
+    "$<TARGET_FILE_DIR:EngineEditor>/slangd.dll"
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${GLOBAL_VULKAN_SDK_BIN}/slang-compiler.dll"
     "$<TARGET_FILE_DIR:EngineEditor>/slang-compiler.dll"
 

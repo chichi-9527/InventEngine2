@@ -29,6 +29,8 @@ target_include_directories(SlangCompiler
 
 target_link_libraries(SlangCompiler 
     PRIVATE Engine
-    PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/slang.lib
+    PRIVATE $<$<CONFIG:Debug>:${GLOBAL_VULKAN_SDK_LIB}/slangd.lib>
+    PRIVATE $<$<NOT:$<CONFIG:Debug>>:${GLOBAL_VULKAN_SDK_LIB}/slang.lib>
+
     PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/slang-compiler.lib
 )
