@@ -14,8 +14,8 @@
 namespace IVulkan
 {
 	constexpr std::uint32_t MAX_FRAMES_IN_FLIGHT = 2U;
-	constexpr std::uint32_t MAX_BINDLESS_TEXTURES = 500000U;
-	constexpr std::uint32_t DEF_BINDLESS_TEXTURES = 100000U;
+	constexpr std::uint32_t MAX_BINDLESS_TEXTURES = 100000U;	// 最大纹理数量 100,000 
+	constexpr std::uint32_t DEF_BINDLESS_TEXTURES = 10000U;		// 默认纹理数量 10,000
 	constexpr std::uint32_t MAX_ALLOCATED_SETS = MAX_FRAMES_IN_FLIGHT;
 	constexpr std::uint32_t EXPECTED_INSTANCE_SIZE = 1 * 1024 * 1024; // 预期的实例数量 1M (个) 
 	constexpr std::uint32_t EXPECTED_UBO_SIZE = 128U;				// 预期的ubo大小 128 (B)

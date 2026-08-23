@@ -13,6 +13,21 @@
 
 namespace INVENT
 {
+	namespace ITools
+	{
+		struct DDS_Header;
+		struct DDS_Header_DX10;
+		struct CompressedTextureData
+		{
+			VkFormat            format;     // VK_FORMAT_BC1_RGB_SRGB_BLOCK ...
+			uint32_t            width;      // 逻辑尺寸（base 已 4 对齐）
+			uint32_t            height;
+			uint32_t            mipLevels;
+			std::vector<uint8_t> blocks;    // 所有 mip 连续排列，与 DDS 文件体字节级一致
+		};
+	}
+
+
 	enum class TextureType : uint32_t
 	{
 		TYPE_Undefined = 0,
@@ -144,11 +159,12 @@ namespace INVENT
 			IMemPoolAllocatorOnlyFixedBlock<std::pair<const size_t, std::string>>>;
 
 
-		IVulkanTexture2DManagement();
+		IVulkanTexture2DManagement() = default;
 	public:
-		~IVulkanTexture2DManagement();
+		~IVulkanTexture2DManagement() = default;
 
 		static IVulkanTexture2DManagement& Instance();
+		bool Init();
 		// 清除所有标识符，释放所有 VkImage/VkImageView
 		void Clear();
 		// 释放 CPU 内存，必须先调用 Clear 否则会造成 GPU 内存泄露
@@ -221,12 +237,26 @@ namespace INVENT
 			uint32_t level_count = 1,
 			VkDeviceSize buffer_offset = 0,
 			VkImageLayout initial_layout = VK_IMAGE_LAYOUT_UNDEFINED);
+		void _upload_bcn_texture(VkBuffer staging_buffer);
+		bool _save_dds_texture(const std::string& path, const std::string& filename,
+			const ITools::DDS_Header& header, const ITools::DDS_Header_DX10& header_dx10, const std::vector<uint8_t>& data);
+		/// <param name="dxgi"> in </param>
+		/// <param name="fmt"> out </param>
+		/// <param name="bytesPerBlock"> out </param>
+		bool _dxgi_to_bcn(uint32_t dxgi, VkFormat& fmt, uint32_t& bytesPerBlock);
+		bool _load_dds_to_compressed_data(const std::string& filepath, ITools::CompressedTextureData& out);
 
 		const Texture2DHandle _find_handle_from_cache(const std::string& name) const;
-		uint32_t _calculate_level_count(const int& width, const int& height) const
+		uint32_t _calculate_level_count(int width, int height) const
 		{
 			return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 		}
+		
+
+#if 1
+		void _test();
+#endif // 1
+
 
 	private:
 		std::vector<IVulkanTexture2DHandle> _textures;

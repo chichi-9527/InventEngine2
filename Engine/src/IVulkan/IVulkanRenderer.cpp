@@ -20,7 +20,7 @@ namespace INVENT
 		{
 			return false;
 		}*/
-		if (!IVulkanTexture2DManagement::Instance().IsValid() ||
+		if (!IVulkanTexture2DManagement::Instance().Init() ||
 			!InstanceBuffer::Init())
 		{
 			return false;
