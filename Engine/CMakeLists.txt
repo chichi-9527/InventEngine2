@@ -28,6 +28,9 @@ target_precompile_headers(Engine PRIVATE
 
 set(EXCLUDE_PCH_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ILog.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/stb/stb_image_resize2.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/stb/stb_image.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/stb/stb_image_write.cpp"
 )
 
 set_source_files_properties(${EXCLUDE_PCH_FILES}
@@ -57,6 +60,7 @@ endif()
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
 set(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/Lua")
+set(ISPC_TEXCOMPRESS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/ISPC_Texcomp")
 set(ONE_HEANER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/OneHeader")
 set(BULLET3_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/bullet3/src")
 set(YAML_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yaml-cpp")
@@ -68,6 +72,7 @@ target_include_directories(Engine
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/EditorInclude # engine editor 头文件目录
     PRIVATE ${GLOBAL_VULKAN_SDK_INC} # vulkan sdk 头文件目录(slang and vulkan headers)
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
+    PRIVATE ${ISPC_TEXCOMPRESS_DIR}/include # ispc texcomp 头文件目录
     PRIVATE ${ONE_HEANER_DIR} # one-header 头文件目录
     PRIVATE ${BULLET3_SRC_DIR} # bullet3 源文件目录
     PRIVATE ${YAML_CPP_DIR}/include # yaml-cpp 头文件目录
@@ -81,6 +86,9 @@ target_link_libraries(Engine
     PRIVATE yogacore
     PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/vulkan-1.lib
     PRIVATE ${LUA_DIR}/lib/lua54.lib
+
+    PRIVATE $<$<CONFIG:Debug>:${ISPC_TEXCOMPRESS_DIR}/Lib/ispc_texcompd.lib>
+    PRIVATE $<$<NOT:$<CONFIG:Debug>>:${ISPC_TEXCOMPRESS_DIR}/Lib/ispc_texcomp.lib>
 
     # bullet3
     PRIVATE BulletDynamics
