@@ -30,6 +30,50 @@ namespace INVENT
 		return true;
 	}
 
+	bool IEngineTools::WriteFile(const std::string& path, const std::string& filename, const std::vector<char>& data)
+	{
+		return WriteFile(path, filename, data.data(), data.size());
+	}
+
+	bool IEngineTools::WriteFile(const std::string& path, const std::string& filename, const char* data, std::size_t size)
+	{
+		auto _current_path = std::filesystem::path{ path } / (filename);
+		if (auto path = _current_path.parent_path(); !path.empty())
+		{
+			std::filesystem::create_directories(path);
+		}
+		std::ofstream out(_current_path, std::ios::out | std::ios::trunc | std::ios::binary);
+		if (!out.is_open())
+		{
+			return false;
+		}
+		out.write(data, size);
+		out.flush();
+		return true;
+	}
+
+	bool IEngineTools::WriteFileAppend(const std::string& path, const std::string& filename, const std::vector<char>& data)
+	{
+		return WriteFileAppend(path, filename, data.data(), data.size());
+	}
+
+	bool IEngineTools::WriteFileAppend(const std::string& path, const std::string& filename, const char* data, std::size_t size)
+	{
+		auto _current_path = std::filesystem::path{ path } / (filename);
+		if (auto path = _current_path.parent_path(); !path.empty())
+		{
+			std::filesystem::create_directories(path);
+		}
+		std::ofstream out(_current_path, std::ios::out | std::ios::app | std::ios::binary);
+		if (!out.is_open())
+		{
+			return false;
+		}
+		out.write(data, size);
+		out.flush();
+		return true;
+	}
+
 	const std::string& IEngineTools::GetRunPath()
 	{
 		return RunPath;

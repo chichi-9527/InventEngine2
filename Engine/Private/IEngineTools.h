@@ -17,6 +17,11 @@ namespace INVENT
 		~IEngineTools() = default;
 
 		static bool ReadFile(const std::string& path, std::vector<char>& out);
+		static bool WriteFile(const std::string& path, const std::string& filename, const std::vector<char>& data);
+		static bool WriteFile(const std::string& path, const std::string& filename, const char* data, std::size_t size);
+		static bool WriteFileAppend(const std::string& path, const std::string& filename, const std::vector<char>& data);
+		static bool WriteFileAppend(const std::string& path, const std::string& filename, const char* data, std::size_t size);
+		
 		static const std::string& GetRunPath();
 		static const std::filesystem::path& GetRunStdPath();
 
