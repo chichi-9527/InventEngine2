@@ -625,9 +625,11 @@ namespace INVENT
 
 				if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
 				{
-					Deallocate<ClassName>(IUserPtr<ClassName>(usedNodeIndex, this), n);
+					IUserPtr<ClassName> uptr(usedNodeIndex, this);
+					Deallocate<ClassName>(uptr, n);
 				}
-				Deallocate<ClassName>(IUserPtr<ClassName>(resPtr), n);
+				IUserPtr<ClassName> uptr(resPtr);
+				Deallocate<ClassName>(uptr, n);
 				return IUserPtr<ClassName>();
 			}
 
@@ -745,9 +747,11 @@ namespace INVENT
 
 				if (needByte > FIXED_POOL_MAX_BLOCK_SIZE)
 				{
-					Deallocate<ClassName>(IUserPtr<ClassName>(usedNodeIndex, this), n);
+					IUserPtr<ClassName> uptr(usedNodeIndex, this);
+					Deallocate<ClassName>(uptr, n);
 				}
-				Deallocate<ClassName>(IUserPtr<ClassName>(resPtr), n);
+				IUserPtr<ClassName> uptr(resPtr);
+				Deallocate<ClassName>(uptr, n);
 				return IUserPtr<ClassName>();
 			}
 
@@ -1578,7 +1582,7 @@ namespace INVENT
 		using pointer = IUserPtr<T>;
 
 		IMemPoolAllocator() noexcept : _pool(nullptr) {}
-		IMemPoolAllocator(IMemPool* pool)
+		explicit IMemPoolAllocator(IMemPool* pool)
 			: _pool(pool)
 		{}
 
@@ -1641,7 +1645,7 @@ namespace INVENT
 		using value_type = T;
 
 		IMemPoolAllocatorOnlyFixedBlock() noexcept : _pool(nullptr) {}
-		IMemPoolAllocatorOnlyFixedBlock(IMemPool* pool)
+		explicit IMemPoolAllocatorOnlyFixedBlock(IMemPool* pool)
 			: _pool(pool)
 		{}
 
