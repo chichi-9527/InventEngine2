@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <cmath>
+#include <algorithm>
 
 namespace INVENT
 {
@@ -24,6 +26,11 @@ namespace INVENT
 		
 		static const std::string& GetRunPath();
 		static const std::filesystem::path& GetRunStdPath();
+
+		static std::uint32_t CalculateMipLevels(std::uint32_t width, std::uint32_t height)
+		{
+			return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+		}
 
 		static IEngineTools& Instance();
 
