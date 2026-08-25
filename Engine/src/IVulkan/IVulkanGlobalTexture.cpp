@@ -5,6 +5,7 @@
 #include "IMemPool/IMemPool.h"
 #include "IThread/IThreadPool.h"
 #include "IVulkan/VulkanBase.h"
+#include "Memory/Memory.h"
 
 #include <StbImage/stb_image.h>
 #include <StbImage/stb_image_resize2.h>
@@ -14,9 +15,12 @@
 #include <stdexcept>
 #include <fstream>
 #include <istream>
+#include <new>
 
 namespace INVENT
 {
+	using Uint8Vector = std::vector<uint8_t, IMemPoolAllocatorOnlyFixedBlock<uint8_t>>;
+
 	namespace ITools
 	{
 #pragma pack(push, 1)
@@ -56,6 +60,15 @@ namespace INVENT
 #pragma pack(pop)
 		static_assert(sizeof(DDS_Header) == 128);
 		static_assert(sizeof(DDS_Header_DX10) == 20);
+
+		struct CompressedTextureData
+		{
+			VkFormat            format;     // VK_FORMAT_BC1_RGB_SRGB_BLOCK ...
+			uint32_t            width;      // 逻辑尺寸（base 已 4 对齐）
+			uint32_t            height;
+			uint32_t            mipLevels;
+			Uint8Vector			blocks;    // 所有 mip 连续排列，与 DDS 文件体字节级一致
+		};
 		
 	}
 
@@ -190,9 +203,9 @@ namespace INVENT
 			{
 				throw std::runtime_error(std::format("failed to load texture image! path : {}", path));
 			}
-			uint32_t levelCount = is_create_mipmaps ? _calculate_level_count(width, height) : 1;
+			uint32_t levelCount = is_create_mipmaps ? IEngineTools::CalculateMipLevels(width, height) : 1;
 			VkFormat textureFormat = VK_FORMAT_R8G8B8A8_SRGB;
-			if (texture_type == TextureType::TYPE_CalculateColor)
+			if (texture_type == TextureType::TYPE_Data)
 			{
 				textureFormat = VK_FORMAT_R8G8B8A8_UNORM;
 			}
@@ -312,9 +325,9 @@ namespace INVENT
 		}
 		uint32_t newWidth = static_cast<uint32_t>(width);
 		uint32_t newHeight = static_cast<uint32_t>(height);
-		uint32_t newMipLevels = is_create_mipmaps ? _calculate_level_count(newWidth, newHeight) : 1;
+		uint32_t newMipLevels = is_create_mipmaps ? IEngineTools::CalculateMipLevels(newWidth, newHeight) : 1;
 		VkFormat textureFormat = VK_FORMAT_R8G8B8A8_SRGB;
-		if (texture_type == TextureType::TYPE_CalculateColor)
+		if (texture_type == TextureType::TYPE_Data)
 		{
 			textureFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		}
@@ -844,7 +857,7 @@ namespace INVENT
 	}
 
 	bool IVulkanTexture2DManagement::_save_dds_texture(const std::string& path, const std::string& filename,
-		const ITools::DDS_Header& header, const ITools::DDS_Header_DX10& header_dx10, const std::vector<uint8_t>& data)
+		const ITools::DDS_Header& header, const ITools::DDS_Header_DX10& header_dx10, const uint8_t* data, size_t data_size)
 	{
 		auto _current_path = std::filesystem::path{ path } / (filename + ".dds");
 		if (auto path = _current_path.parent_path(); !path.empty())
@@ -861,7 +874,7 @@ namespace INVENT
 		// 2. 寫入 DX10 擴展檔頭
 		out.write(reinterpret_cast<const char*>(&header_dx10), sizeof(ITools::DDS_Header_DX10));
 		// 3. 一次性刷入所有 Mipmaps 的壓縮區塊數據
-		out.write(reinterpret_cast<const char*>(data.data()), data.size());
+		out.write(reinterpret_cast<const char*>(data), data_size);
 		return true;
 	}
 
@@ -871,8 +884,6 @@ namespace INVENT
 		{
 		case 71: fmt = VK_FORMAT_BC1_RGB_UNORM_BLOCK; bytesPerBlock = 8;  return true;
 		case 72: fmt = VK_FORMAT_BC1_RGB_SRGB_BLOCK; bytesPerBlock = 8;  return true;
-		case 74: fmt = VK_FORMAT_BC2_UNORM_BLOCK;    bytesPerBlock = 16; return true;
-		case 75: fmt = VK_FORMAT_BC2_SRGB_BLOCK;     bytesPerBlock = 16; return true;
 		case 77: fmt = VK_FORMAT_BC3_UNORM_BLOCK;    bytesPerBlock = 16; return true;
 		case 78: fmt = VK_FORMAT_BC3_SRGB_BLOCK;     bytesPerBlock = 16; return true;
 		case 80: fmt = VK_FORMAT_BC4_UNORM_BLOCK;    bytesPerBlock = 8;  return true;
@@ -914,98 +925,43 @@ namespace INVENT
 	void IVulkanTexture2DManagement::_test()
 	{
 		int width1, height1, channels1;
-		uint8_t* src_pixels1 = stbi_load("Config/EngineAssets/image/test.png", &width1, &height1, &channels1, 4);
+		auto src_pixels1 = stbi_loadf("Config/EngineAssets/image/test.png", &width1, &height1, &channels1, 4);
 		if (!src_pixels1)
 		{
 			INVENT_LOG_ERROR("Failed to load input image: 1");
 			return;
 		}
-		int base_w = (width1 + 3) & ~3;
-		int base_h = (height1 + 3) & ~3;
-		if (base_w < 4) base_w = 4;
-		if (base_h < 4) base_h = 4;
-		INVENT_LOG_DEBUG(std::format("[texture test] Original Size: {} x {}  -> BCn Aligned Base Size: {} x {}.", width1, height1, base_w, base_h));
-		int mip_levels = _calculate_level_count(base_w, base_h);
-		INVENT_LOG_DEBUG(std::format("[texture test] Total Mipmap Levels to generate: {}.", mip_levels));
-		// 用於儲存最終要寫入檔案的全部二進位數據
-		std::vector<uint8_t> final_file_data;
+		
+		auto pool = IEngineTools::Instance().GetMemPoolPool();
+		ITextureCompresser::CompressedTextureData texdata{};
+		//texdata.data = new ITextureCompresser::Uint8Vector{ IMemPoolAllocatorOnlyFixedBlock<uint8_t>(pool) };
+		//texdata.offsets = new ITextureCompresser::Uint32Vector{ IMemPoolAllocatorOnlyFixedBlock<uint32_t>(pool) };
+		void* dataptr = EngineAllocator::Allocate(sizeof(ITextureCompresser::Uint8Vector));
+		texdata.data = ::new(dataptr) ITextureCompresser::Uint8Vector{ IMemPoolAllocatorOnlyFixedBlock<uint8_t>(pool) };
+		void* offsetptr = EngineAllocator::Allocate(sizeof(ITextureCompresser::Uint32Vector));
+		texdata.offsets = ::new(offsetptr) ITextureCompresser::Uint32Vector{ IMemPoolAllocatorOnlyFixedBlock<uint32_t>(pool) };
+		ITextureCompresser::CompressTextureFRGBA(texdata, src_pixels1, { static_cast<uint32_t>(width1),static_cast<uint32_t>(height1) });
+
 		// 準備 DDS 檔頭
 		ITools::DDS_Header dds_hdr;
-		dds_hdr.dwWidth = base_w;
-		dds_hdr.dwHeight = base_h;
-		dds_hdr.dwMipMapCount = mip_levels;
+		dds_hdr.dwWidth = texdata.width;
+		dds_hdr.dwHeight = texdata.height;
+		dds_hdr.dwMipMapCount = texdata.mipLevels;
 		// BC7 每個 4x4 區塊(16像素)佔 16 位元組，所以 LinearSize = 區塊數量 * 16
-		dds_hdr.dwPitchOrLinearSize = ((base_w + 3) / 4) * ((base_h + 3) / 4) * 16;
+		// BC1/BC4 8
+		// BC6H 16
+		dds_hdr.dwPitchOrLinearSize = ((texdata.width + 3) / 4) * ((texdata.height + 3) / 4) * 16;
 		ITools::DDS_Header_DX10 dds_dx10;
+		dds_dx10.dxgiFormat = 95;
 		
-		// 分配一個臨時的緩衝區用於儲存當前 Mip 階層的未壓縮 RGBA 數據
-		std::vector<uint8_t> current_rgba(base_w * base_h * 4);
-		// 處理 Mip 0 層級的縮放（如果原圖尺寸不是4的倍數，會進行細微拉伸拉伸到對齊尺寸）
-		stbir_resize_uint8_linear(src_pixels1, width1, height1, 0,
-			current_rgba.data(), base_w, base_h, 0,
-			STBIR_RGBA);
-		stbi_image_free(src_pixels1); // 釋放原圖記憶體
-		// 設定 ispc_texcomp 的壓縮參數 (這裡以 BC7 的極速模式為例)
-		bc7_enc_settings settings;
-		GetProfile_ultrafast(&settings);
-		int current_w = base_w;
-		int current_h = base_h;
-		// 迴圈處理每一層 Mipmap
-		for (int level = 0; level < mip_levels; ++level)
-		{
-			INVENT_LOG_DEBUG(std::format("[texture test] -> Processing Mip Level {} ({}x{})...", level, current_w, current_h));
-			// 確保目前層級寬高符合 4x4 區塊要求
-			int block_w = (current_w + 3) & ~3;
-			int block_h = (current_h + 3) & ~3;
-			if (block_w < 4) block_w = 4;
-			if (block_h < 4) block_h = 4;
-			// 如果當前 Mip 尺寸不等於對齊後的區塊尺寸，需要再次 Resize
-			std::vector<uint8_t> aligned_rgba;
-			if (current_w != block_w || current_h != block_h)
-			{
-				aligned_rgba.resize(block_w * block_h * 4);
-				stbir_resize_uint8_linear(current_rgba.data(), current_w, current_h, 0,
-					aligned_rgba.data(), block_w, block_h, 0,
-					STBIR_RGBA);
-			}
-			else
-			{
-				aligned_rgba = current_rgba; // 尺寸剛好對齊，直接複製
-			}
-			// 配置 ispc_texcomp 所需的輸入表面結構體体
-			rgba_surface surface;
-			surface.ptr = aligned_rgba.data();
-			surface.width = block_w;
-			surface.height = block_h;
-			surface.stride = block_w * 4; // 每一行的位元組數
-			// 計算壓縮後 BC7 的輸出大小：BC7 每個 4x4 區塊佔 16 位元組 (若是 BC1 則改為 8 位元組)
-			int num_blocks_x = block_w / 4;
-			int num_blocks_y = block_h / 4;
-			size_t compressed_size = num_blocks_x * num_blocks_y * 16;
-			std::vector<uint8_t> compressed_blocks(compressed_size);
-			// [3] 核心步驟：調用你的 ispc_texcomp 進行 BC7 壓縮
-			CompressBlocksBC7(&surface, compressed_blocks.data(), &settings);
-			final_file_data.insert(final_file_data.end(), compressed_blocks.begin(), compressed_blocks.end());
-			// 為下一層 Mipmap 準備縮小一半的尺寸（最小到 1x1）
-			int next_w = std::max(1, current_w / 2);
-			int next_h = std::max(1, current_h / 2);
-
-			if (level < mip_levels - 1)
-			{
-				std::vector<uint8_t> next_rgba(next_w * next_h * 4);
-				stbir_resize_uint8_linear(current_rgba.data(), current_w, current_h, 0,
-					next_rgba.data(), next_w, next_h, 0,
-					STBIR_RGBA);
-				current_rgba = std::move(next_rgba);
-				current_w = next_w;
-				current_h = next_h;
-			}
-		}
 		INVENT_LOG_DEBUG("[texture test] Writing compressed DDS asset ...");
-		if (!_save_dds_texture("Config/EngineAssets/image", "test.png", dds_hdr, dds_dx10, final_file_data))
+		if (!_save_dds_texture("Config/EngineAssets/image", "test.png", dds_hdr, dds_dx10, texdata.data->data(), texdata.data->size()))
 		{
 			INVENT_LOG_ERROR("[texture test] FAILED to save file.");
 		}
+
+		EngineAllocator::Deallocate(dataptr);
+		EngineAllocator::Deallocate(offsetptr);
 
 	}
 #endif // 1

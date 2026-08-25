@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "IBitArray.h"
+#include "ITextureCompresser.h"
 
 #include <cstdint>
 #include <string>
@@ -17,22 +18,34 @@ namespace INVENT
 	{
 		struct DDS_Header;
 		struct DDS_Header_DX10;
-		struct CompressedTextureData
-		{
-			VkFormat            format;     // VK_FORMAT_BC1_RGB_SRGB_BLOCK ...
-			uint32_t            width;      // 逻辑尺寸（base 已 4 对齐）
-			uint32_t            height;
-			uint32_t            mipLevels;
-			std::vector<uint8_t> blocks;    // 所有 mip 连续排列，与 DDS 文件体字节级一致
-		};
+		struct CompressedTextureData;
+		
 	}
 
 
 	enum class TextureType : uint32_t
 	{
 		TYPE_Undefined = 0,
-		TYPE_WatchColor,
-		TYPE_CalculateColor
+		TYPE_Color,				// diffuse / emission
+		TYPE_Normal,			// normal BC5
+		TYPE_SingleChannel,		// roughness / ao / opacity
+		TYPE_Data				// specular / clear coat
+	};
+	enum class TextureCompressionType : uint32_t {
+		NoCompression = 0,
+		Auto,					// 根据 alpha 通道自动选择
+		BC1_RGB_UNORM = 71,
+		BC1_RGB_SRGB = 72,
+		BC3_UNORM = 77,
+		BC3_SRGB = 78,
+		BC4_UNORM = 80,
+		BC4_SNORM = 81,
+		BC5_UNORM = 83,
+		BC5_SNORM = 84,
+		BC6H_UFLOAT = 95,
+		BC6H_SFLOAT = 96,
+		BC7_UNORM = 98,
+		BC7_SRGB = 99
 	};
 
 	template<typename T>
@@ -202,7 +215,7 @@ namespace INVENT
 		bool IsValid() const { return _is_valid; }
 
 		IVulkanTexture2DHandle GetVulkanTextureHandle(const Texture2DHandle& handle) const;
-
+		
 		void QueueDestroy(VkImage image, VkImageView image_view);
 		void FlushDestroyQueue();
 		void UploadTextureAndGenerateMipmaps(VkBuffer staging_buffer,
@@ -239,7 +252,7 @@ namespace INVENT
 			VkImageLayout initial_layout = VK_IMAGE_LAYOUT_UNDEFINED);
 		void _upload_bcn_texture(VkBuffer staging_buffer);
 		bool _save_dds_texture(const std::string& path, const std::string& filename,
-			const ITools::DDS_Header& header, const ITools::DDS_Header_DX10& header_dx10, const std::vector<uint8_t>& data);
+			const ITools::DDS_Header& header, const ITools::DDS_Header_DX10& header_dx10, const uint8_t* data, size_t data_size);
 		/// <param name="dxgi"> in </param>
 		/// <param name="fmt"> out </param>
 		/// <param name="bytesPerBlock"> out </param>
@@ -247,10 +260,6 @@ namespace INVENT
 		bool _load_dds_to_compressed_data(const std::string& filepath, ITools::CompressedTextureData& out);
 
 		const Texture2DHandle _find_handle_from_cache(const std::string& name) const;
-		uint32_t _calculate_level_count(int width, int height) const
-		{
-			return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
-		}
 		
 
 #if 1
