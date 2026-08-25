@@ -68,7 +68,7 @@ namespace INVENT
 			_manager->insert({ reinterpret_cast<uint64_t>(ptr), _ptr_data{ recordSize, alignment, fromPool } });
 			});
 		
-		return nullptr;
+		return ptr;
 	}
 
 	void EngineAllocator::Deallocate(void* ptr) 
