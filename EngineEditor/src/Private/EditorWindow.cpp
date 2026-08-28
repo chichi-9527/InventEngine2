@@ -54,7 +54,7 @@ bool EditorWindow::Start()
 {
     INVENT::IEngine::Instatnce().Init();
     if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
-    void* test = INVENT::EngineAllocator::Allocate(8);
+    
     //
     if (!GetGameProjects())
     {
