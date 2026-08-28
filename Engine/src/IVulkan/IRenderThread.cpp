@@ -42,6 +42,8 @@ namespace INVENT
 			return false;
 		}
 
+		if (!IVulkanBase::InitVmaAllocationCache()) return false;
+
 		IVulkanBase::AddDeviceExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 		if (!IVulkanBase::Base().CreateVulkanInstance())
 		{

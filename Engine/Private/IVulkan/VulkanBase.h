@@ -54,6 +54,8 @@ namespace INVENT
 		static void AddInstanceExtension(const char* extensionName);
 		static void AddDeviceExtension(const char* extensionName);
 
+		static bool InitVmaAllocationCache();
+
 		static IVulkanBase& Base();
 
 		void SetWaitForWindowEventsFunction(WaitForWindowEventsFunc func) { _wait_for_window_events = func; }
@@ -127,13 +129,19 @@ namespace INVENT
 		* VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT				需要拉回 CPU 處理的場景
 		*/
 
-		bool UseVmaCreateBuffer(VkDeviceSize size,
+		void InsertVmaBufferCache(VkBuffer buffer, VmaAllocation allocation);
+		void InsertVmaImageCache(VkImage image, VmaAllocation allocation);
+		VmaAllocation GetFormBufferCache(VkBuffer buffer);
+		VmaAllocation GetFormImageCache(VkImage image);
+		void EraseBufferCache(VkBuffer buffer);
+		void EraseImageCache(VkImage image);
+		VkResult UseVmaCreateBuffer(VkDeviceSize size,
 			VkBufferUsageFlags usage,
 			VmaAllocationCreateFlags vma_flags,
 			VkBuffer& buffer,
 			void** out_mapped_data = nullptr);
 		void UseVmaDestroyBuffer(VkBuffer buffer);
-		bool UseVmaCreateImage(uint32_t width,
+		VkResult UseVmaCreateImage(uint32_t width,
 			uint32_t height,
 			uint32_t mip_levels,
 			VkFormat format,
@@ -155,6 +163,7 @@ namespace INVENT
 		void DestroyImageView(VkImageView image_view);
 		bool UseVmaMapMemory(VkBuffer buffer, void*& data);
 		void UseVmaUnmapMemory(VkBuffer buffer);
+		VmaAllocator GetVmaAllocator() const;
 
 		VkFormat GetSwapChainImageFormat() const { return _swap_chain_image_format; }
 		VkFormat GetDepthFormat() const { return _depth_format; }
@@ -163,6 +172,7 @@ namespace INVENT
 		VkDevice GetDevice() const { return _device; }
 		VkSwapchainKHR GetSwapChain() const { return _swap_chain; }
 		const VkPhysicalDeviceProperties& GetPhysicalDeviceProperties() const { return _physical_device_properties; }
+		const VkPhysicalDeviceMemoryProperties& GetPhysicalDeviceMemoryProperties() const { return _physical_device_memory_properties; }
 		uint32_t GetCurrentBindlessDescriptorCount() const { return _current_descriptor_count; }
 		VkPipelineLayout GetVkPipelineLayout() const { return _global_pipeline_layout; }
 		const std::uint32_t GetAPIVersion() const noexcept { return _api_version; }

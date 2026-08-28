@@ -4,9 +4,12 @@
 #include "IEngine.h"
 #include "IEngineTools.h"
 #include "IVulkan/VulkanConfig.h"
+#include "IMemPool/IMemPool.h"
 
 #include <cstdlib>
+#include <cstdint>
 #include <filesystem>
+#include <shared_mutex>
 
 #include <vma/vk_mem_alloc.h>
 
@@ -18,9 +21,18 @@
 
 namespace INVENT
 {
+	using VmaAllocationCache = std::unordered_map<
+		std::uint64_t,
+		VmaAllocation,
+		std::hash<std::uint64_t>,
+		std::equal_to<std::uint64_t>,
+		IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::uint64_t, VmaAllocation>>>;
+
 	static VmaAllocator vmaAllocator = nullptr;
-	static std::unordered_map<VkBuffer, VmaAllocation> MapBufferAllocation;
-	static std::unordered_map<VkImage, VmaAllocation> MapImageAllocation;
+	static VmaAllocationCache* MapBufferAllocation = nullptr;
+	static std::shared_mutex BufferCacheMutex;
+	static VmaAllocationCache* MapImageAllocation = nullptr;
+	static std::shared_mutex ImageCacheMutex;
 
 	static std::vector<const char*> validationLayers;
 	static std::vector<const char*> instanceExtensions;
@@ -73,6 +85,26 @@ namespace INVENT
 	void IVulkanBase::AddDeviceExtension(const char* extensionName)
 	{
 		deviceExtensions.push_back(extensionName);
+	}
+
+	bool IVulkanBase::InitVmaAllocationCache()
+	{
+		auto pool = IEngineTools::Instance().GetMemPoolPool();
+		if (pool == nullptr)
+		{
+			INVENT_LOG_ERROR("[VulkanBase] the memory pool is not init.");
+			return false;
+		}
+
+		MapBufferAllocation = new VmaAllocationCache(64,
+			std::hash<std::uint64_t>(),
+			std::equal_to<std::uint64_t>(),
+			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::uint64_t, VmaAllocation>>(pool));
+		MapImageAllocation = new VmaAllocationCache(64,
+			std::hash<std::uint64_t>(),
+			std::equal_to<std::uint64_t>(),
+			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::uint64_t, VmaAllocation>>(pool));
+		return true;
 	}
 
 	IVulkanBase& IVulkanBase::Base()
@@ -1011,7 +1043,49 @@ namespace INVENT
 		vkFreeCommandBuffers(_device, _command_pool, 1, &command_buffer);
 	}
 
-	bool IVulkanBase::UseVmaCreateBuffer(VkDeviceSize size,
+	void IVulkanBase::InsertVmaBufferCache(VkBuffer buffer, VmaAllocation allocation)
+	{
+		std::unique_lock<std::shared_mutex> lock(BufferCacheMutex);
+		(*MapBufferAllocation)[reinterpret_cast<std::uint64_t>(buffer)] = allocation;
+	}
+
+	void IVulkanBase::InsertVmaImageCache(VkImage image, VmaAllocation allocation)
+	{
+		std::unique_lock<std::shared_mutex> lock(ImageCacheMutex);
+		(*MapImageAllocation)[reinterpret_cast<std::uint64_t>(image)] = allocation;
+	}
+
+	VmaAllocation IVulkanBase::GetFormBufferCache(VkBuffer buffer)
+	{
+		std::shared_lock<std::shared_mutex> lock(BufferCacheMutex);
+		auto iter = MapBufferAllocation->find(reinterpret_cast<std::uint64_t>(buffer));
+		if (iter != MapBufferAllocation->end())
+			return iter->second;
+		return nullptr;
+	}
+
+	VmaAllocation IVulkanBase::GetFormImageCache(VkImage image)
+	{
+		std::shared_lock<std::shared_mutex> lock(ImageCacheMutex);
+		auto iter = MapImageAllocation->find(reinterpret_cast<std::uint64_t>(image));
+		if (iter != MapImageAllocation->end())
+			return iter->second;
+		return nullptr;
+	}
+
+	void IVulkanBase::EraseBufferCache(VkBuffer buffer)
+	{
+		std::unique_lock<std::shared_mutex> lock(BufferCacheMutex);
+		MapBufferAllocation->erase(reinterpret_cast<std::uint64_t>(buffer));
+	}
+
+	void IVulkanBase::EraseImageCache(VkImage image)
+	{
+		std::unique_lock<std::shared_mutex> lock(ImageCacheMutex);
+		MapImageAllocation->erase(reinterpret_cast<std::uint64_t>(image));
+	}
+
+	VkResult IVulkanBase::UseVmaCreateBuffer(VkDeviceSize size,
 		VkBufferUsageFlags usage,
 		VmaAllocationCreateFlags vma_flags,
 		VkBuffer& buffer,
@@ -1032,27 +1106,33 @@ namespace INVENT
 		if (VkResult result = vmaCreateBuffer(vmaAllocator, &bufferInfo, &vmaAllocCreateInfo, &buffer, &allocation, &vmaAllocInfo))
 		{
 			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create buffer! VkBufferUsageFlags : {}, VkResult: {}.", static_cast<int32_t>(usage), static_cast<int32_t>(result)));
-			return false;
+			return result;
 		}
 
-		MapBufferAllocation[buffer] = allocation;
+		{
+			std::unique_lock<std::shared_mutex> lock(BufferCacheMutex);
+			(*MapBufferAllocation)[reinterpret_cast<std::uint64_t>(buffer)] = allocation;
+		}
+
 		if (out_mapped_data && (vma_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT))
 		{
 			*out_mapped_data = vmaAllocInfo.pMappedData;
 		}
 
-		return true;
+		return VK_SUCCESS;
 	}
 
 	void IVulkanBase::UseVmaDestroyBuffer(VkBuffer buffer)
 	{
-		auto iter = MapBufferAllocation.find(buffer);
-		if (iter != MapBufferAllocation.end())
+		std::unique_lock<std::shared_mutex> lock(BufferCacheMutex);
+
+		auto iter = MapBufferAllocation->find(reinterpret_cast<std::uint64_t>(buffer));
+		if (iter != MapBufferAllocation->end())
 			vmaDestroyBuffer(vmaAllocator, buffer, iter->second);
-		MapBufferAllocation.erase(buffer);
+		MapBufferAllocation->erase(reinterpret_cast<std::uint64_t>(buffer));
 	}
 
-	bool IVulkanBase::UseVmaCreateImage(uint32_t width,
+	VkResult IVulkanBase::UseVmaCreateImage(uint32_t width,
 		uint32_t height,
 		uint32_t mip_levels,
 		VkFormat format,
@@ -1088,30 +1168,38 @@ namespace INVENT
 		if (VkResult result = vmaCreateImage(vmaAllocator, &imageInfo, &vmaAllocCreateInfo, &image, &allocation, &vmaAllocInfo))
 		{
 			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create image! VkResult: {}.", static_cast<int32_t>(result)));
-			return false;
+			return result;
 		}
 
-		MapImageAllocation[image] = allocation;
+		{
+			std::unique_lock<std::shared_mutex> lock(ImageCacheMutex);
+			(*MapImageAllocation)[reinterpret_cast<std::uint64_t>(image)] = allocation;
+		}
+
 		if (out_mapped_data && (vma_flags & VMA_ALLOCATION_CREATE_MAPPED_BIT))
 		{
 			*out_mapped_data = vmaAllocInfo.pMappedData;
 		}
 
-		return true;
+		return VK_SUCCESS;
 	}
 
 	void IVulkanBase::UseVmaDestroyImage(VkImage image)
 	{
-		auto iter = MapImageAllocation.find(image);
-		if (iter != MapImageAllocation.end())
+		std::unique_lock<std::shared_mutex> lock(ImageCacheMutex);
+
+		auto iter = MapImageAllocation->find(reinterpret_cast<std::uint64_t>(image));
+		if (iter != MapImageAllocation->end())
 			vmaDestroyImage(vmaAllocator, image, iter->second);
-		MapImageAllocation.erase(image);
+		MapImageAllocation->erase(reinterpret_cast<std::uint64_t>(image));
 	}
 
 	bool IVulkanBase::UseVmaFlushAllocationBuffer(VkBuffer buffer)
 	{
-		auto iter = MapBufferAllocation.find(buffer);
-		if (iter != MapBufferAllocation.end())
+		std::shared_lock<std::shared_mutex> lock(BufferCacheMutex);
+
+		auto iter = MapBufferAllocation->find(reinterpret_cast<std::uint64_t>(buffer));
+		if (iter != MapBufferAllocation->end())
 		{
 			if (VkResult result = vmaFlushAllocation(vmaAllocator, iter->second, 0, VK_WHOLE_SIZE))
 			{
@@ -1124,8 +1212,10 @@ namespace INVENT
 
 	bool IVulkanBase::UseVmaFlushAllocationImage(VkImage buffer)
 	{
-		auto iter = MapImageAllocation.find(buffer);
-		if (iter != MapImageAllocation.end())
+		std::shared_lock<std::shared_mutex> lock(ImageCacheMutex);
+
+		auto iter = MapImageAllocation->find(reinterpret_cast<std::uint64_t>(buffer));
+		if (iter != MapImageAllocation->end())
 		{
 			if (VkResult result = vmaFlushAllocation(vmaAllocator, iter->second, 0, VK_WHOLE_SIZE))
 			{
@@ -1178,7 +1268,9 @@ namespace INVENT
 
 	bool IVulkanBase::UseVmaMapMemory(VkBuffer buffer, void*& data)
 	{
-		if (VkResult result = vmaMapMemory(vmaAllocator, MapBufferAllocation[buffer], &data))
+		std::shared_lock<std::shared_mutex> lock(BufferCacheMutex);
+
+		if (VkResult result = vmaMapMemory(vmaAllocator, (*MapBufferAllocation)[reinterpret_cast<std::uint64_t>(buffer)], &data))
 		{
 			INVENT_LOG_ERROR("[VulkanBase] use vma map memory error!");
 			return false;
@@ -1188,7 +1280,13 @@ namespace INVENT
 
 	void IVulkanBase::UseVmaUnmapMemory(VkBuffer buffer)
 	{
-		vmaUnmapMemory(vmaAllocator, MapBufferAllocation[buffer]);
+		std::shared_lock<std::shared_mutex> lock(BufferCacheMutex);
+		vmaUnmapMemory(vmaAllocator, (*MapBufferAllocation)[reinterpret_cast<std::uint64_t>(buffer)]);
+	}
+
+	VmaAllocator IVulkanBase::GetVmaAllocator() const
+	{
+		return vmaAllocator;
 	}
 
 	const std::uint32_t IVulkanBase::_use_lastest_api_version()

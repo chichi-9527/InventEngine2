@@ -5,6 +5,7 @@
 #include "IMemPool/IMemPool.h"
 #include "IThread/IThreadPool.h"
 #include "IVulkan/VulkanBase.h"
+#include "IVulkan/ITieredImageMemoryManager.h"
 #include "Memory/Memory.h"
 
 #include <StbImage/stb_image.h>
@@ -91,6 +92,7 @@ namespace INVENT
 
 		_init_other();
 		_init_default_image();
+		if (!ITieredImageMemoryManager::Init()) return false;
 
 #if 1
 		_test();
@@ -214,7 +216,7 @@ namespace INVENT
 
 			VkBuffer stagingBuffer;
 			void* data;
-			if (!IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
+			if (VkResult res = IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
 				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
 				stagingBuffer,
@@ -235,7 +237,7 @@ namespace INVENT
 			//
 
 			VkImage image = VK_NULL_HANDLE;
-			if (!IVulkanBase::Base().UseVmaCreateImage(width,
+			if (VkResult res = IVulkanBase::Base().UseVmaCreateImage(width,
 				height,
 				levelCount,
 				textureFormat,
@@ -340,7 +342,7 @@ namespace INVENT
 
 			VkBuffer stagingBuffer;
 			void* data;
-			if (!IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
+			if (VkResult res = IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
 				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
 				stagingBuffer,
@@ -377,7 +379,7 @@ namespace INVENT
 			else
 			{
 				VkImage newImage = VK_NULL_HANDLE;
-				if (!IVulkanBase::Base().UseVmaCreateImage(width,
+				if (VkResult res = IVulkanBase::Base().UseVmaCreateImage(width,
 					height,
 					newMipLevels,
 					textureFormat,
@@ -554,7 +556,7 @@ namespace INVENT
 
 		VkBuffer stagingBuffer;
 		void* data;
-		if (!IVulkanBase::Base().UseVmaCreateBuffer(stagingBufferSize,
+		if (VkResult res = IVulkanBase::Base().UseVmaCreateBuffer(stagingBufferSize,
 			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 			VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
 			stagingBuffer,

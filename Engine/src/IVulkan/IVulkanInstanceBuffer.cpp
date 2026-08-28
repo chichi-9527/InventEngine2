@@ -33,7 +33,7 @@ namespace INVENT
 			INVENT_LOG_WARNING(std::format("[InstanceBuffer] 默认批次（普通不透明批次）的实例数量只有 {} 个.", _current_instance_num - allOthers));
 		}
 		// init vkbuffer
-		if (!IVulkanBase::Base().UseVmaCreateBuffer(static_cast<VkDeviceSize>(_current_instance_num) * sizeof(InstanceData),
+		if (VkResult res = IVulkanBase::Base().UseVmaCreateBuffer(static_cast<VkDeviceSize>(_current_instance_num) * sizeof(InstanceData),
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 			VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
 			_ssbo,
