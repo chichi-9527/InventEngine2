@@ -60,8 +60,13 @@ namespace INVENT
 		VmaAllocationCreateInfo imageAllocInfo{};
 		imageAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
+#if 0
 		vmaFindMemoryTypeIndexForImageInfo(allocator, &imageCreateInfo, &imageAllocInfo, &_image_memory_type_index);
-		INVENT_LOG_INFO(std::format("[ITieredImageMemoryManager] Find memory type index for image: {}.", _image_memory_type_index));
+		const VkPhysicalDeviceMemoryProperties* memProps;
+		vmaGetMemoryProperties(allocator, &memProps);
+		uint32_t heapIndex = memProps->memoryTypes[_image_memory_type_index].heapIndex;
+		INVENT_LOG_INFO(std::format("[ITieredImageMemoryManager] Find memory heap index for image: {}.", heapIndex));
+#endif
 
 		VmaPoolCreateInfo imagePoolCreateInfo{};
 		imagePoolCreateInfo.memoryTypeIndex = _image_memory_type_index;
@@ -90,7 +95,7 @@ namespace INVENT
 		uint32_t i{ 0 };
 		for (auto& budget : Budgets)
 		{
-			INVENT_LOG_INFO(std::format("[ITieredImageMemoryManager] \tNO.{} : {} MB.", ++i, static_cast<std::uint64_t>(budget.budget) / (1024 * 1024)));
+			INVENT_LOG_INFO(std::format("[ITieredImageMemoryManager] \tNO.{} : {} MB.", i++, static_cast<std::uint64_t>(budget.budget) / (1024 * 1024)));
 		}
 
 		return true;
