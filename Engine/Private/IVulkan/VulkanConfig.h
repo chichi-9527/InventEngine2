@@ -14,14 +14,16 @@
 namespace IVulkan
 {
 	constexpr std::uint32_t MAX_FRAMES_IN_FLIGHT = 2U;
-	constexpr std::uint32_t MAX_BINDLESS_TEXTURES = 100000U;	// 最大纹理数量 100,000 
+	constexpr std::uint32_t MAX_BINDLESS_TEXTURES = 1U << 16;	// 最大纹理数量 65,536 (使用此最大值目的是纹理 ID 可以用 uint16 表示以降低显存占用)
 	constexpr std::uint32_t DEF_BINDLESS_TEXTURES = 10000U;		// 默认纹理数量 10,000
 	constexpr std::uint32_t MAX_ALLOCATED_SETS = MAX_FRAMES_IN_FLIGHT;
 	constexpr std::uint32_t EXPECTED_INSTANCE_SIZE = 1 * 1024 * 1024; // 预期的实例数量 1M (个) 
 	constexpr std::uint32_t EXPECTED_UBO_SIZE = 128U;				// 预期的ubo大小 128 (B)
 	constexpr std::uint32_t MAX_POINT_LIGHT_COUNT = 100U;
 	constexpr std::uint32_t DEF_ONE_BUFFER_SIZE = 32 * 1024 * 1024; // 默认管理类中单个 VkBuffer 大小  32 (MB)
+	constexpr std::uint32_t DEF_STAGING_BUFFER_SIZE = 32 * 1024 * 1024; // 默认单个暂存缓冲区 VkBuffer 大小  32 (MB)
 	constexpr std::uint64_t CREATE_VKIMAGE_LIMIT = 1 * 1024 * 1024; // 当创建小于 1(MB) 字节的 VkImage 时用 vmaPool,否则強制开启 Dedicated 独立分配
+	constexpr std::uint32_t MAX_DEDICATE_VKIMAGE_NUM = 2048; // 当创建大于 1(MB) 字节的 VkImage 时开启 Dedicated 独立分配的最大个数 2048(个)
 	constexpr double MAX_TEXTURE_BUDGET_RATIO = 0.50; // "纹理"占可用显存最大比例 50%
 	constexpr std::uint64_t ABSOLUTE_SAFETY_MARGIN = 64 * 1024 * 1024; // 64(MB) 全域余量
 	constexpr std::uint64_t DEF_IMAGE_POOL_BLOCK_SIZE = 64 * 1024 * 1024; // 默认 vmaPool 块大小 64(MB)
