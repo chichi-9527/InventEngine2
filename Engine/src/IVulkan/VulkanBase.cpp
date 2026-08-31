@@ -247,6 +247,7 @@ namespace INVENT
 
 		INVENT_LOG_INFO("[VulkanBase] pick physical devic done.");
 		INVENT_LOG_INFO(std::format("[VulkanBase] device name : {}.", _physical_device_properties.deviceName));
+		INVENT_LOG_INFO(std::format("[VulkanBase] 是否有专用传输队列 : {}.", _queue_family_indices.HasTransferFamily ? "是" : "否"));
 		_get_all_properties();
 		INVENT_LOG_INFO(std::format("[VulkanBase] device maximum number of sampled image descriptors : {}.", _descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages));
 
@@ -257,6 +258,10 @@ namespace INVENT
 	{
 		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
 		std::set<uint32_t> uniqueQueueFamilies = { _queue_family_indices.GraphicsFamily,_queue_family_indices.PresentFamily };
+		if (_queue_family_indices.HasTransferFamily)
+		{
+			uniqueQueueFamilies.insert(_queue_family_indices.TransferFamily);
+		}
 		float queuePriority = 1.0f;
 		for (auto queueFamily : uniqueQueueFamilies)
 		{
@@ -308,6 +313,8 @@ namespace INVENT
 
 		vkGetDeviceQueue(_device, _queue_family_indices.GraphicsFamily, 0, &_graphics_queue);
 		vkGetDeviceQueue(_device, _queue_family_indices.PresentFamily, 0, &_present_queue);
+		if (_queue_family_indices.HasTransferFamily)
+			vkGetDeviceQueue(_device, _queue_family_indices.TransferFamily, 0, &_transfer_queue);
 
 		return true;
 	}
@@ -1334,7 +1341,14 @@ namespace INVENT
 				indices.HasPresentFamily = true;
 			}
 
-			if (indices.IsComplete()) break;
+			if ((queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+				!(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+			{
+				indices.TransferFamily = i;
+				indices.HasTransferFamily = true;
+			}
+
+			if (indices.IsComplete() && indices.HasTransferFamily) break;
 
 			i++;
 		}

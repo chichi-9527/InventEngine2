@@ -21,9 +21,11 @@ namespace INVENT
 		struct QueueFamilyIndices {
 			uint32_t GraphicsFamily = 0;
 			uint32_t PresentFamily = 0;
+			uint32_t TransferFamily = 0;
 
 			bool HasGraphicsFamily = false;
 			bool HasPresentFamily = false;
+			bool HasTransferFamily = false;
 
 			bool IsComplete() const
 			{
@@ -202,6 +204,7 @@ namespace INVENT
 		VkPhysicalDevice _physical_device = VK_NULL_HANDLE;
 		VkQueue _graphics_queue = VK_NULL_HANDLE;
 		VkQueue _present_queue = VK_NULL_HANDLE;
+		VkQueue _transfer_queue = VK_NULL_HANDLE;
 		VkSwapchainKHR _swap_chain = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT _debug_messenger = VK_NULL_HANDLE;
 		VkDescriptorPool _bindless_descriptor_pool = VK_NULL_HANDLE;
