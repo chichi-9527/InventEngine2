@@ -30,6 +30,12 @@ namespace INVENT
 			std::uint32_t       width{ 0 };
 			std::uint32_t       height{ 0 };
 			std::uint32_t       mipLevels{ 0 };
+
+			operator bool() const noexcept
+			{
+				return data != nullptr &&
+					offsets != nullptr;
+			}
 		};
 		struct TextureSize 
 		{
