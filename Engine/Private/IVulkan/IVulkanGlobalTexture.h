@@ -2,6 +2,7 @@
 
 #include "IBitArray.h"
 #include "ITextureCompresser.h"
+#include "IVulkan/ITieredImageMemoryManager.h"
 
 #include <cstdint>
 #include <string>
@@ -18,11 +19,14 @@ namespace INVENT
 	{
 		struct DDS_Header;
 		struct DDS_Header_DX10;
-		struct CompressedTextureData;
 		
 	}
 
 
+	/*
+	* SRGB:  擴散貼圖 (Diffuse Map) 基礎顏色貼圖 (Albedo Map) 反射貼圖 (Specular Map)
+	* UNORM: 法線貼圖 (Normal Map) 粗糙度貼圖 (Roughness Map) 金屬度貼圖 (Metalic Map) 遮蔽貼圖 (AO Map)
+	*/
 	enum class TextureType : uint32_t
 	{
 		TYPE_Undefined = 0,
@@ -60,104 +64,45 @@ namespace INVENT
 			VkImageView ImageView = VK_NULL_HANDLE;
 		};
 
+		enum DefaultTextureType : uint32_t 
+		{
+			White = 0,
+			Black,
+			NormalBlue,
+			Transparent,
+			DefaultCount
+		};
+
 		struct Texture2DHandle
 		{
-			IHandle handle{};
-			std::uint64_t version{ 0 };
+			std::uint32_t slot{ UINT32_MAX };
 
-			Texture2DHandle() = default;
-			constexpr Texture2DHandle(size_t h)
-				: handle(h){}
-			constexpr Texture2DHandle(size_t h, std::uint32_t v)
-				: handle(h), version(v) {}
-			Texture2DHandle(const Texture2DHandle&) = default;
-			Texture2DHandle(Texture2DHandle&&) noexcept = default;
-
-			Texture2DHandle& operator=(const Texture2DHandle&) = default;
-			Texture2DHandle& operator=(Texture2DHandle&&) noexcept = default;
-
-			friend bool operator==(const Texture2DHandle& handle1, const Texture2DHandle& handle2)
-			{
-				return handle1.handle == handle2.handle &&
-					handle1.version == handle2.version;
-			}
-
-			bool IsValid() const noexcept { return handle.IsValid(); }
+			bool IsValid() const noexcept { return slot != UINT32_MAX; }
 		};
 
 		struct IVulkanTexture2DHandle
 		{
 			VkImage Image = VK_NULL_HANDLE;
 			VkImageView ImageView = VK_NULL_HANDLE;
-			VkFormat Format = VK_FORMAT_UNDEFINED;
-			std::uint64_t Version{ 0 };
-			std::uint32_t Width{ 0 };
-			std::uint32_t Height{ 0 };
-			std::uint32_t MipLevels{ 1 };
-
-			IVulkanTexture2DHandle() = default;
-			IVulkanTexture2DHandle(const std::pair<VkImage, VkImageView>& v)
-				: Image(v.first)
-				, ImageView(v.second)
-			{}
-			IVulkanTexture2DHandle(VkImage i, VkImageView iv, VkFormat f, std::uint64_t v, std::uint32_t w, std::uint32_t h, std::uint32_t m)
-				: Image(i)
-				, ImageView(iv)
-				, Format(f)
-				, Version(v)
-				, Width(w)
-				, Height(h)
-				, MipLevels(m)
-			{}
-			IVulkanTexture2DHandle(const IVulkanTexture2DHandle&) = default;
-			IVulkanTexture2DHandle(IVulkanTexture2DHandle&&) noexcept = default;
-			IVulkanTexture2DHandle& operator=(const IVulkanTexture2DHandle&) = default;
-			IVulkanTexture2DHandle& operator=(IVulkanTexture2DHandle&&) noexcept = default;
-			IVulkanTexture2DHandle& operator=(const std::pair<VkImage, VkImageView>& v)
-			{
-				Image = v.first;
-				ImageView = v.second;
-				return *this;
-			}
-			IVulkanTexture2DHandle& operator++()
-			{
-				++Version;
-				return *this;
-			}
-			IVulkanTexture2DHandle operator++(int)
-			{
-				IVulkanTexture2DHandle old = *this;
-				++(*this);
-				return old;
-			}
-
-			struct ImageSize 
-			{
-				VkFormat Format = VK_FORMAT_UNDEFINED;
-				std::uint32_t Width{ 0 };
-				std::uint32_t Height{ 0 };
-				std::uint32_t MipLevels{ 0 };
-			};
-			friend bool operator==(const IVulkanTexture2DHandle& handle,const ImageSize& isize) noexcept
-			{
-				return handle.Format == isize.Format &&
-					handle.Width == isize.Width &&
-					handle.Height == isize.Height &&
-					handle.MipLevels == isize.MipLevels;
-			}
-			bool CanReused(const ImageSize& isize) const noexcept
-			{
-				return this->IsValid() && (*this) == isize;
-			}
+			std::uint32_t CurrentMaxMipLevel{ UINT32_MAX };
 
 			bool IsValid() const noexcept
 			{
-				return Image != VK_NULL_HANDLE &&
-					ImageView != VK_NULL_HANDLE;
+				return CurrentMaxMipLevel != UINT32_MAX;
 			}
 		};
 
 	private:
+
+		enum class LodDDSType : uint32_t 
+		{
+			BC1,
+			BC3,
+			BC4,
+			BC5,
+			BC6H,
+			BC7
+		};
 
 		using TextureNameMap = std::unordered_map < std::string,
 			Texture2DHandle,
@@ -165,11 +110,11 @@ namespace INVENT
 			std::equal_to<std::string>,
 			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::string, Texture2DHandle>>>;
 		using TextureHandleNameMap = std::unordered_map<
-			size_t,
+			std::uint32_t,
 			std::string,
-			std::hash<size_t>,
-			std::equal_to<size_t>,
-			IMemPoolAllocatorOnlyFixedBlock<std::pair<const size_t, std::string>>>;
+			std::hash<std::uint32_t>,
+			std::equal_to<std::uint32_t>,
+			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::uint32_t, std::string>>>;
 
 
 		IVulkanTexture2DManagement() = default;
@@ -184,15 +129,19 @@ namespace INVENT
 		// 在调用 IEngine::Shutdown() 之前调用
 		void Terminate();
 
-		static constexpr Texture2DHandle GetWhitePixel() noexcept { return 0; }
-		static constexpr Texture2DHandle GetBlackPixel() noexcept { return 1; }
-		static constexpr Texture2DHandle GetNormalPixel() noexcept { return 2; }
 
 		Texture2DHandle AllocateTextureHandle();
 		/// <returns> 失败时会返回无效的句柄 </returns>
-		Texture2DHandle AddTexture2D(const std::string& path, TextureType texture_type = TextureType::TYPE_Undefined, bool is_create_mipmaps = true);
+		Texture2DHandle AddTexture2D(const std::string& path,
+			TextureType texture_type = TextureType::TYPE_Undefined,
+			TextureCompressionType compression_type = TextureCompressionType::Auto,
+			std::uint32_t mip_levels = 0);
 		/// <returns> 失败时会返回无效的句柄 </returns>
-		Texture2DHandle AddTexture2D(const std::string& name, const std::string& path, TextureType texture_type = TextureType::TYPE_Undefined, bool is_create_mipmaps = true);
+		Texture2DHandle AddTexture2D(const std::string& name,
+			const std::string& path,
+			TextureType texture_type = TextureType::TYPE_Undefined,
+			TextureCompressionType compression_type = TextureCompressionType::Auto,
+			std::uint32_t mip_levels = 0);
 		/// <returns> 失败时会返回无效的句柄 </returns>
 		Texture2DHandle AddTexture2D(const std::string& name,
 			VkImage image, VkImageView image_view,
@@ -250,17 +199,13 @@ namespace INVENT
 			uint32_t level_count = 1,
 			VkDeviceSize buffer_offset = 0,
 			VkImageLayout initial_layout = VK_IMAGE_LAYOUT_UNDEFINED);
-		void _upload_bcn_texture(VkBuffer staging_buffer);
+
 		bool _save_dds_texture(const std::string& path, const std::string& filename,
 			const ITools::DDS_Header& header, const ITools::DDS_Header_DX10& header_dx10, const uint8_t* data, size_t data_size);
-		/// <param name="dxgi"> in </param>
-		/// <param name="fmt"> out </param>
-		/// <param name="bytesPerBlock"> out </param>
-		bool _dxgi_to_bcn(uint32_t dxgi, VkFormat& fmt, uint32_t& bytesPerBlock);
-		bool _load_dds_to_compressed_data(const std::string& filepath, ITools::CompressedTextureData& out);
 
-		const Texture2DHandle _find_handle_from_cache(const std::string& name) const;
-		
+		bool _load_dds_to_compressed_data(const std::string& filepath, ITextureCompresser::CompressedTextureData& out, LodDDSType type);
+
+		Texture2DHandle _find_handle_from_cache(const std::string& name) const;
 
 #if 1
 		void _test();
@@ -268,7 +213,12 @@ namespace INVENT
 
 
 	private:
+		std::vector<IVulkanTexture2DHandle> _default_textures;
 		std::vector<IVulkanTexture2DHandle> _textures;
+
+		std::vector<ITextureCompresser::CompressedTextureData> _textures_data;
+
+
 		IBitVectorSafe _bit_vector_used{};
 		IBitVectorSafe _bit_vector_valid{};
 

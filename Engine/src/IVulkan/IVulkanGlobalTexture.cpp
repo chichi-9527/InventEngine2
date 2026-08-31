@@ -5,18 +5,19 @@
 #include "IMemPool/IMemPool.h"
 #include "IThread/IThreadPool.h"
 #include "IVulkan/VulkanBase.h"
-#include "IVulkan/ITieredImageMemoryManager.h"
 #include "Memory/Memory.h"
 
 #include <StbImage/stb_image.h>
 #include <StbImage/stb_image_resize2.h>
 #include <StbImage/stb_image_write.h>
 #include <ispc_texcomp.h>
+#include <dds_image/dds.hpp>
 
 #include <stdexcept>
 #include <fstream>
 #include <istream>
 #include <new>
+#include <filesystem>
 
 namespace INVENT
 {
@@ -62,15 +63,6 @@ namespace INVENT
 		static_assert(sizeof(DDS_Header) == 128);
 		static_assert(sizeof(DDS_Header_DX10) == 20);
 
-		struct CompressedTextureData
-		{
-			VkFormat            format;     // VK_FORMAT_BC1_RGB_SRGB_BLOCK ...
-			uint32_t            width;      // 逻辑尺寸（base 已 4 对齐）
-			uint32_t            height;
-			uint32_t            mipLevels;
-			Uint8Vector			blocks;    // 所有 mip 连续排列，与 DDS 文件体字节级一致
-		};
-		
 	}
 
 	IVulkanTexture2DManagement& IVulkanTexture2DManagement::Instance()
@@ -87,6 +79,8 @@ namespace INVENT
 		INVENT_LOG_INFO(std::format("[IVulkanTexture2DManagement] current bindless descriptor count: {}.", textureCount));
 
 		_textures.resize(textureCount, IVulkanTexture2DHandle());
+		_textures_data.resize(textureCount);
+
 		_bit_vector_used.ResizeBitCount(textureCount);
 		_bit_vector_valid.ResizeBitCount(textureCount);
 
@@ -140,53 +134,49 @@ namespace INVENT
 
 	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AllocateTextureHandle()
 	{
-		Texture2DHandle handle;
-		handle.handle = _bit_vector_used.FindFirstZero();
-		if (!handle.handle.IsValid())
+		IHandle handle = _bit_vector_used.FindFirstZero();
+		if (!handle.IsValid())
 		{
 			if (!IVulkanBase::Base().ResizeBindlessDescriptorPoolAndGobalSet())
 			{
-				return Texture2DHandle();
+				return Texture2DHandle{};
 			}
 
 			_update_texture_count();
-			handle.handle = _bit_vector_used.FindFirstZero();
+			handle = _bit_vector_used.FindFirstZero();
 		}
 
 		//auto index = handle.GetRealIndex();
 
-		_bit_vector_used.SetValue<true>(handle.handle);
+		_bit_vector_used.SetValue<true>(handle);
 
 		/*
 		_bit_vector_vaild.SetValue<false>(handle.BitSetIndex, handle.BitIndex);
 		_textures[index] = IVulkanTexture2DHandle{ VK_NULL_HANDLE, VK_NULL_HANDLE };
 		*/
 
-		return handle;
+		return { static_cast<std::uint32_t>(handle.GetRealIndex()) };
 	}
 
 	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& path,
-		TextureType texture_type,
-		bool is_create_mipmaps)
+		TextureType texture_type, TextureCompressionType compression_type, std::uint32_t mip_levels)
 	{
-
-		auto startcount = path.find_last_of("/\\") + 1;
-		auto lastcount = path.find_last_of('.');
-		std::string name = path.substr(startcount, lastcount - startcount);
+		std::string name = std::filesystem::path{ path }.filename().string();
 		if (name.empty())
 		{
 			INVENT_LOG_WARNING(std::format("name is empty; path : {}", path));
 			name = "Empty";
 		}
 
-		return AddTexture2D(name, path, texture_type, is_create_mipmaps);
+		return AddTexture2D(name, path, texture_type, compression_type, mip_levels);
 	}
 
-	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name,
-		const std::string& path,
-		TextureType texture_type,
-		bool is_create_mipmaps)
+
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name, const std::string& path,
+		TextureType texture_type, TextureCompressionType compression_type, std::uint32_t mip_levels)
 	{
+		if (!std::filesystem::exists(path)) return Texture2DHandle{};
+
 		Texture2DHandle handle = _find_handle_from_cache(name);
 		if (handle.IsValid())
 			return handle;
@@ -197,7 +187,17 @@ namespace INVENT
 			return handle;
 		}
 
-		IEngineTools::Instance().GetWorkThreadPool()->Submit(0, [this, handle, path, texture_type, is_create_mipmaps]() {
+		auto pool = IEngineTools::Instance().GetMemPoolPool();
+		auto& data = _textures_data[handle.slot];
+		if (!data)
+		{
+			void* dataptr = EngineAllocator::Allocate(sizeof(ITextureCompresser::Uint8Vector));
+			data.data = ::new(dataptr) ITextureCompresser::Uint8Vector{ IMemPoolAllocatorOnlyFixedBlock<uint8_t>(pool) };
+			void* offsetptr = EngineAllocator::Allocate(sizeof(ITextureCompresser::Uint32Vector));
+			data.offsets = ::new(offsetptr) ITextureCompresser::Uint32Vector{ IMemPoolAllocatorOnlyFixedBlock<uint32_t>(pool) };
+		}
+
+		IEngineTools::Instance().GetWorkThreadPool()->Submit(0, [this, handle, path, texture_type, compression_type, mip_levels]() {
 			int width = 0, height = 0, channels = 0;
 			auto texData = stbi_load(path.c_str(), &width, &height, &channels, 4);
 
@@ -205,8 +205,29 @@ namespace INVENT
 			{
 				throw std::runtime_error(std::format("failed to load texture image! path : {}", path));
 			}
-			uint32_t levelCount = is_create_mipmaps ? IEngineTools::CalculateMipLevels(width, height) : 1;
+
 			VkFormat textureFormat = VK_FORMAT_R8G8B8A8_SRGB;
+
+			if (compression_type != TextureCompressionType::NoCompression)
+			{
+
+			}
+
+			switch (texture_type)
+			{
+			case INVENT::TextureType::TYPE_Undefined:
+			case INVENT::TextureType::TYPE_Color:
+				break;
+			case INVENT::TextureType::TYPE_Normal:
+				break;
+			case INVENT::TextureType::TYPE_SingleChannel:
+				break;
+			case INVENT::TextureType::TYPE_Data:
+				break;
+			default:
+				break;
+			}
+
 			if (texture_type == TextureType::TYPE_Data)
 			{
 				textureFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -236,48 +257,48 @@ namespace INVENT
 
 			//
 
-			VkImage image = VK_NULL_HANDLE;
-			if (VkResult res = IVulkanBase::Base().UseVmaCreateImage(width,
-				height,
-				levelCount,
-				textureFormat,
-				VK_IMAGE_TILING_OPTIMAL,
-				VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // 生成 mipmap
-				0,
-				image))
-			{
-				throw std::runtime_error(std::format("failed to create image! path : {}", path));
-			}
+			//VkImage image = VK_NULL_HANDLE;
+			//if (VkResult res = IVulkanBase::Base().UseVmaCreateImage(width,
+			//	height,
+			//	levelCount,
+			//	textureFormat,
+			//	VK_IMAGE_TILING_OPTIMAL,
+			//	VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // 生成 mipmap
+			//	0,
+			//	image))
+			//{
+			//	throw std::runtime_error(std::format("failed to create image! path : {}", path));
+			//}
 
-			_upload_texture_and_generate_mipmaps(stagingBuffer,
-				image,
-				textureFormat,
-				width,
-				height,
-				levelCount);
+			//_upload_texture_and_generate_mipmaps(stagingBuffer,
+			//	image,
+			//	textureFormat,
+			//	width,
+			//	height,
+			//	levelCount);
 
-			IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
+			//IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
 
-			VkImageView imageView = IVulkanBase::Base().CreateImageView(image,
-				textureFormat,
-				VK_IMAGE_ASPECT_COLOR_BIT,
-				VK_IMAGE_VIEW_TYPE_2D,
-				levelCount);
-			if (imageView == VK_NULL_HANDLE)
-			{
-				IVulkanBase::Base().UseVmaDestroyImage(image);
-				throw std::runtime_error(std::format("failed to create texture image view! path : {}", path));
-			}
+			//VkImageView imageView = IVulkanBase::Base().CreateImageView(image,
+			//	textureFormat,
+			//	VK_IMAGE_ASPECT_COLOR_BIT,
+			//	VK_IMAGE_VIEW_TYPE_2D,
+			//	levelCount);
+			//if (imageView == VK_NULL_HANDLE)
+			//{
+			//	IVulkanBase::Base().UseVmaDestroyImage(image);
+			//	throw std::runtime_error(std::format("failed to create texture image view! path : {}", path));
+			//}
 
-			IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(handle.handle.GetRealIndex()), imageView);
-			{
-				std::unique_lock lock(_textures_mutex);
-				_textures[handle.handle.GetRealIndex()] = { image,imageView,textureFormat,std::uint64_t{0},static_cast<uint32_t>(width),static_cast<uint32_t>(height),levelCount };
-			}
-			_bit_vector_valid.SetValue<true>(handle.handle);
+			//IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(handle.handle.GetRealIndex()), imageView);
+			//{
+			//	std::unique_lock lock(_textures_mutex);
+			//	_textures[handle.handle.GetRealIndex()] = { image,imageView,textureFormat,std::uint64_t{0},static_cast<uint32_t>(width),static_cast<uint32_t>(height),levelCount };
+			//}
+			//_bit_vector_valid.SetValue<true>(handle.handle);
 			});
 
-		_insert_name_cache(name, handle);
+		 _insert_name_cache(name, handle);
 		return handle;
 	}
 
@@ -296,14 +317,14 @@ namespace INVENT
 			return handle;
 		}
 
-		IEngineTools::Instance().GetWorkThreadPool()->Submit(0, [this, handle, image, image_view, width, height, mip_levels, format]() {
+		/*IEngineTools::Instance().GetWorkThreadPool()->Submit(0, [this, handle, image, image_view, width, height, mip_levels, format]() {
 			IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(handle.handle.GetRealIndex()), image_view);
 			{
 				std::unique_lock lock(_textures_mutex);
 				_textures[handle.handle.GetRealIndex()] = { image,image_view,format,std::uint64_t{0},std::uint32_t{width},std::uint32_t{height},mip_levels };
 			}
 			_bit_vector_valid.SetValue<true>(handle.handle);
-			});
+			});*/
 
 		_insert_name_cache(name, handle);
 		return handle;
@@ -316,7 +337,7 @@ namespace INVENT
 		if (!handle.IsValid()) return Texture2DHandle{};
 
 		
-		size_t index = handle.handle.GetRealIndex();
+		//size_t index = handle.handle.GetRealIndex();
 
 		int width = 0, height = 0, channels = 0;
 		auto texData = stbi_load(path.c_str(), &width, &height, &channels, 4);
@@ -334,99 +355,99 @@ namespace INVENT
 			textureFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		}
 
-		{
-			std::unique_lock lock(_textures_mutex);
-			auto& slot = _textures[index];
-			bool reusable = slot.CanReused({ textureFormat, newWidth, newHeight, newMipLevels });
-			VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
+		//{
+		//	std::unique_lock lock(_textures_mutex);
+		//	auto& slot = _textures[index];
+		//	bool reusable = slot.CanReused({ textureFormat, newWidth, newHeight, newMipLevels });
+		//	VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * 4;
 
-			VkBuffer stagingBuffer;
-			void* data;
-			if (VkResult res = IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
-				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-				stagingBuffer,
-				&data))
-			{
-				stbi_image_free(texData);
-				throw std::runtime_error(std::format("failed to load staging buffer! path : {}", path));
-			}
+		//	VkBuffer stagingBuffer;
+		//	void* data;
+		//	if (VkResult res = IVulkanBase::Base().UseVmaCreateBuffer(imageSize,
+		//		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		//		VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+		//		stagingBuffer,
+		//		&data))
+		//	{
+		//		stbi_image_free(texData);
+		//		throw std::runtime_error(std::format("failed to load staging buffer! path : {}", path));
+		//	}
 
-			memcpy(data, texData, static_cast<size_t>(imageSize));
-			if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
-			{
-				throw std::runtime_error("failed to flush buffer allocation!");
-			}
+		//	memcpy(data, texData, static_cast<size_t>(imageSize));
+		//	if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
+		//	{
+		//		throw std::runtime_error("failed to flush buffer allocation!");
+		//	}
 
-			stbi_image_free(texData);
+		//	stbi_image_free(texData);
 
-			if (reusable)
-			{
-				_upload_texture_and_generate_mipmaps(
-					stagingBuffer,
-					slot.Image,
-					textureFormat,
-					newWidth,
-					newHeight,
-					newMipLevels,
-					0,
-					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-				IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
-				++slot;
-				handle.version = slot.Version;
-				slot.MipLevels = newMipLevels;
-			}
-			else
-			{
-				VkImage newImage = VK_NULL_HANDLE;
-				if (VkResult res = IVulkanBase::Base().UseVmaCreateImage(width,
-					height,
-					newMipLevels,
-					textureFormat,
-					VK_IMAGE_TILING_OPTIMAL,
-					VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // 生成 mipmap
-					0,
-					newImage))
-				{
-					IVulkanBase::Base().UseVmaDestroyImage(newImage);
-					throw std::runtime_error(std::format("failed to create image! path : {}", path));
-				}
+		//	if (reusable)
+		//	{
+		//		_upload_texture_and_generate_mipmaps(
+		//			stagingBuffer,
+		//			slot.Image,
+		//			textureFormat,
+		//			newWidth,
+		//			newHeight,
+		//			newMipLevels,
+		//			0,
+		//			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		//		IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
+		//		++slot;
+		//		handle.version = slot.Version;
+		//		//slot.MipLevels = newMipLevels;
+		//	}
+		//	else
+		//	{
+		//		VkImage newImage = VK_NULL_HANDLE;
+		//		if (VkResult res = IVulkanBase::Base().UseVmaCreateImage(width,
+		//			height,
+		//			newMipLevels,
+		//			textureFormat,
+		//			VK_IMAGE_TILING_OPTIMAL,
+		//			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, // 生成 mipmap
+		//			0,
+		//			newImage))
+		//		{
+		//			IVulkanBase::Base().UseVmaDestroyImage(newImage);
+		//			throw std::runtime_error(std::format("failed to create image! path : {}", path));
+		//		}
 
-				_upload_texture_and_generate_mipmaps(stagingBuffer,
-					newImage,
-					textureFormat,
-					width,
-					height,
-					newMipLevels);
+		//		_upload_texture_and_generate_mipmaps(stagingBuffer,
+		//			newImage,
+		//			textureFormat,
+		//			width,
+		//			height,
+		//			newMipLevels);
 
-				IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
+		//		IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
 
-				VkImageView newImageView = IVulkanBase::Base().CreateImageView(newImage,
-					textureFormat,
-					VK_IMAGE_ASPECT_COLOR_BIT,
-					VK_IMAGE_VIEW_TYPE_2D,
-					newMipLevels);
-				if (newImageView == VK_NULL_HANDLE)
-				{
-					throw std::runtime_error(std::format("failed to create texture image view! path : {}", path));
-				}
-				// 保存旧资源，稍后销毁
-				VkImage oldImage = slot.Image;
-				VkImageView oldImageView = slot.ImageView;
-				// 更新槽位为新的 image/view
-				slot.Image = newImage;
-				slot.ImageView = newImageView;
-				slot.Width = newWidth;
-				slot.Height = newHeight;
-				slot.Format = textureFormat;
-				slot.MipLevels = newMipLevels;
-				IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(index), newImageView);
-				++slot;
-				handle.version = slot.Version;
+		//		VkImageView newImageView = IVulkanBase::Base().CreateImageView(newImage,
+		//			textureFormat,
+		//			VK_IMAGE_ASPECT_COLOR_BIT,
+		//			VK_IMAGE_VIEW_TYPE_2D,
+		//			newMipLevels);
+		//		if (newImageView == VK_NULL_HANDLE)
+		//		{
+		//			throw std::runtime_error(std::format("failed to create texture image view! path : {}", path));
+		//		}
+		//		// 保存旧资源，稍后销毁
+		//		VkImage oldImage = slot.Image;
+		//		VkImageView oldImageView = slot.ImageView;
+		//		// 更新槽位为新的 image/view
+		//		slot.Image = newImage;
+		//		slot.ImageView = newImageView;
+		//		/*slot.Width = newWidth;
+		//		slot.Height = newHeight;
+		//		slot.Format = textureFormat;
+		//		slot.MipLevels = newMipLevels;*/
+		//		IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(index), newImageView);
+		//		++slot;
+		//		handle.version = slot.Version;
 
-				QueueDestroy(oldImage, oldImageView);
-			}
-		}
+		//		QueueDestroy(oldImage, oldImageView);
+		//	}
+		//}
 		return handle;
 	}
 
@@ -436,20 +457,20 @@ namespace INVENT
 		VkFormat format)
 	{
 		if (!handle.IsValid()) return Texture2DHandle{};
-		auto& slot = _textures[handle.handle.GetRealIndex()];
-		VkImage oldImage = slot.Image;
-		VkImageView oldImageView = slot.ImageView;
-		slot.Image = image;
-		slot.ImageView = image_view;
-		slot.Width = width;
-		slot.Height = height;
-		slot.Format = format;
-		IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(handle.handle.GetRealIndex()), image_view);
-		++slot; // ++slot.Version
-		handle.version = slot.Version;
-		_bit_vector_valid.SetValue<true>(handle.handle);
+		//auto& slot = _textures[handle.handle.GetRealIndex()];
+		//VkImage oldImage = slot.Image;
+		//VkImageView oldImageView = slot.ImageView;
+		//slot.Image = image;
+		//slot.ImageView = image_view;
+		///*slot.Width = width;
+		//slot.Height = height;
+		//slot.Format = format;*/
+		//IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(handle.handle.GetRealIndex()), image_view);
+		//++slot; // ++slot.Version
+		//handle.version = slot.Version;
+		//_bit_vector_valid.SetValue<true>(handle.handle);
 
-		QueueDestroy(oldImage, oldImageView);
+		//QueueDestroy(oldImage, oldImageView);
 
 		return handle;
 	}
@@ -459,22 +480,22 @@ namespace INVENT
 		std::uint32_t width, std::uint32_t height, std::uint32_t mip_levels,
 		VkFormat format)
 	{
-		if (!handle.IsValid()) return Texture2DHandle{};
-		{
-			std::unique_lock lock(_textures_mutex);
-			auto& slot = _textures[handle.handle.GetRealIndex()];
-			VkImage oldImage = slot.Image;
-			VkImageView oldImageView = slot.ImageView;
-			slot.Image = image;
-			slot.ImageView = image_view;
-			slot.Width = width;
-			slot.Height = height;
-			slot.Format = format;
-			IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(handle.handle.GetRealIndex()), image_view);
-			++slot; // ++slot.Version
-			handle.version = slot.Version;
-		}
-		_bit_vector_valid.SetValue<true>(handle.handle);
+		//if (!handle.IsValid()) return Texture2DHandle{};
+		//{
+		//	std::unique_lock lock(_textures_mutex);
+		//	auto& slot = _textures[handle.handle.GetRealIndex()];
+		//	VkImage oldImage = slot.Image;
+		//	VkImageView oldImageView = slot.ImageView;
+		//	slot.Image = image;
+		//	slot.ImageView = image_view;
+		//	/*slot.Width = width;
+		//	slot.Height = height;
+		//	slot.Format = format;*/
+		//	IVulkanBase::Base().UpdateBindlessTextureSlot(static_cast<uint32_t>(handle.handle.GetRealIndex()), image_view);
+		//	++slot; // ++slot.Version
+		//	handle.version = slot.Version;
+		//}
+		//_bit_vector_valid.SetValue<true>(handle.handle);
 
 		return handle;
 	}
@@ -482,19 +503,19 @@ namespace INVENT
 	void IVulkanTexture2DManagement::DestroyTexture2D(Texture2DHandle& handle)
 	{
 		if (!handle.IsValid()) return;
-		const size_t index = handle.handle.GetRealIndex();
-		{
-			std::unique_lock<std::shared_mutex> texLock(_textures_mutex);
-			auto& slot = _textures[index];
-			// 1. 销毁 Vulkan 资源
-			QueueDestroy(slot.Image, slot.ImageView);
-			// 2. 清空槽位
-			slot = IVulkanTexture2DHandle{};
-		}
-		// 
-		_bit_vector_valid.SetValue<false>(handle.handle);
-		_bit_vector_used.SetValue<false>(handle.handle);
-		//
+		//const size_t index = handle.handle.GetRealIndex();
+		//{
+		//	std::unique_lock<std::shared_mutex> texLock(_textures_mutex);
+		//	auto& slot = _textures[index];
+		//	// 1. 销毁 Vulkan 资源
+		//	QueueDestroy(slot.Image, slot.ImageView);
+		//	// 2. 清空槽位
+		//	slot = IVulkanTexture2DHandle{};
+		//}
+		//// 
+		//_bit_vector_valid.SetValue<false>(handle.handle);
+		//_bit_vector_used.SetValue<false>(handle.handle);
+		////
 		_remove_name_cache_by_handle(handle);
 		handle = {};
 	}
@@ -502,16 +523,17 @@ namespace INVENT
 	bool IVulkanTexture2DManagement::IsTextureReady(const Texture2DHandle & handle) const
 	{
 		if (!handle.IsValid()) return false;
-		return _bit_vector_valid[handle.handle.BitSetIndex][handle.handle.BitIndex];
+		//return _bit_vector_valid[handle.handle.BitSetIndex][handle.handle.BitIndex];
 	}
 
 	IVulkanTexture2DManagement::IVulkanTexture2DHandle 
 		IVulkanTexture2DManagement::GetVulkanTextureHandle(const Texture2DHandle& handle) const
 	{
 		if (!handle.IsValid()) throw std::runtime_error("[GetVulkanTextureHandle] handle is not valid!");
-		size_t index = handle.handle.GetRealIndex();
-		std::shared_lock lock(_textures_mutex);
-		return _textures[index];
+		/*size_t index = handle.handle.GetRealIndex();
+		std::shared_lock lock(_textures_mutex);*/
+		//return _textures[index];
+		return _textures[0];
 	}
 
 	void IVulkanTexture2DManagement::QueueDestroy(VkImage image, VkImageView image_view)
@@ -534,25 +556,21 @@ namespace INVENT
 			if (item.ImageView != VK_NULL_HANDLE)
 				IVulkanBase::Base().DestroyImageView(item.ImageView);
 			if (item.Image != VK_NULL_HANDLE)
-				IVulkanBase::Base().UseVmaDestroyImage(item.Image);
+				ITieredImageMemoryManager::DestroyVkImage(item.Image);
 		}
 	}
 
 	void IVulkanTexture2DManagement::_init_default_image()
 	{
-		_bit_vector_used.SetValue<true>(IHandle(0));
-		_bit_vector_used.SetValue<true>(IHandle(1));
-		_bit_vector_used.SetValue<true>(IHandle(2));
-		_insert_name_cache("DefaultWhitePixel", 0 );
-		_insert_name_cache("DefaultBlackPixel", 1);
-		_insert_name_cache("DefaultNormalPixel", 2);
+		_default_textures.resize(DefaultTextureType::DefaultCount);
 
 		uint32_t whitePixel = 0xFFFFFFFF;
 		uint32_t blackPixel = 0xFF000000;
 		uint32_t normalPixel = 0xFFFF8080;
+		uint32_t transparentPixel = 0x00FFFFFF;
 
 		constexpr VkDeviceSize DefaultSingleImageSize = static_cast<VkDeviceSize>(1) * 1 * 4;
-		constexpr VkDeviceSize stagingBufferSize = DefaultSingleImageSize * 3;
+		constexpr VkDeviceSize stagingBufferSize = DefaultSingleImageSize * DefaultTextureType::DefaultCount;
 
 		VkBuffer stagingBuffer;
 		void* data;
@@ -565,7 +583,7 @@ namespace INVENT
 			throw std::runtime_error("failed to load staging buffer! : _init_default_image");
 		}
 
-		uint32_t pixels[] = { whitePixel,blackPixel,normalPixel };
+		uint32_t pixels[] = { whitePixel,blackPixel,normalPixel,transparentPixel };
 		memcpy(data, pixels, static_cast<size_t>(stagingBufferSize));
 		if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
 		{
@@ -598,9 +616,7 @@ namespace INVENT
 		{
 			throw std::runtime_error("failed to create texture image view! white pixel");
 		}
-		IVulkanBase::Base().UpdateBindlessTextureSlot(0, whiteImageView);
-		_textures[0] = { whiteImage, whiteImageView, VK_FORMAT_R8G8B8A8_SRGB, 0, 1, 1, 1 };
-		_bit_vector_valid.SetValue<true>(IHandle(0));
+		_default_textures[DefaultTextureType::White] = { whiteImage,whiteImageView,0 };
 
 		// black
 		VkImage blackImage;
@@ -628,9 +644,7 @@ namespace INVENT
 		{
 			throw std::runtime_error("failed to create texture image view! white pixel");
 		}
-		IVulkanBase::Base().UpdateBindlessTextureSlot(1, blackImageView);
-		_textures[1] = { blackImage, blackImageView, VK_FORMAT_R8G8B8A8_SRGB, 0, 1, 1, 1 };
-		_bit_vector_valid.SetValue<true>(IHandle(1));
+		_default_textures[DefaultTextureType::Black] = { blackImage,blackImageView,0 };
 
 		// normal
 		VkImage normalImage;
@@ -658,9 +672,35 @@ namespace INVENT
 		{
 			throw std::runtime_error("failed to create texture image view! white pixel");
 		}
-		IVulkanBase::Base().UpdateBindlessTextureSlot(2, normalImageView);
-		_textures[2] = { normalImage, normalImageView, VK_FORMAT_R8G8B8A8_UNORM, 0, 1, 1, 1 };
-		_bit_vector_valid.SetValue<true>(IHandle(2));
+		_default_textures[DefaultTextureType::NormalBlue] = { normalImage,normalImageView,0 };
+
+		// transparent
+		VkImage transparentImage;
+		IVulkanBase::Base().UseVmaCreateImage(1,
+			1,
+			1,
+			VK_FORMAT_R8G8B8A8_SRGB,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			0,
+			transparentImage);
+		_upload_texture_and_generate_mipmaps(stagingBuffer,
+			transparentImage,
+			VK_FORMAT_R8G8B8A8_SRGB,
+			1,
+			1,
+			1,
+			DefaultSingleImageSize * 3);
+		VkImageView transparentImageView = IVulkanBase::Base().CreateImageView(transparentImage,
+			VK_FORMAT_R8G8B8A8_SRGB,
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_VIEW_TYPE_2D,
+			1);
+		if (transparentImageView == VK_NULL_HANDLE)
+		{
+			throw std::runtime_error("failed to create texture image view! white pixel");
+		}
+		_default_textures[DefaultTextureType::Transparent] = { transparentImage,transparentImageView,0 };
 
 		IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
 	}
@@ -672,16 +712,16 @@ namespace INVENT
 			std::equal_to<std::string>(),
 			IMemPoolAllocatorOnlyFixedBlock< std::pair<const std::string, Texture2DHandle>>(IEngineTools::Instance().GetMemPoolPool()));
 		_texture_handle_name_cache = new TextureHandleNameMap(64,
-			std::hash<size_t>(),
-			std::equal_to<size_t>(),
-			IMemPoolAllocatorOnlyFixedBlock<std::pair<const size_t, std::string>>(IEngineTools::Instance().GetMemPoolPool()));
+			std::hash<std::uint32_t>(),
+			std::equal_to<std::uint32_t>(),
+			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::uint32_t, std::string>>(IEngineTools::Instance().GetMemPoolPool()));
 	}
 
 	void IVulkanTexture2DManagement::_insert_name_cache(const std::string& name, Texture2DHandle handle)
 	{
 		std::unique_lock<std::shared_mutex> lock(_cache_mutex);
 		_texture_name_cache->insert({ name, handle });
-		_texture_handle_name_cache->insert({ handle.handle.GetRealIndex(), name });
+		_texture_handle_name_cache->insert({ handle.slot, name });
 	}
 
 	void IVulkanTexture2DManagement::_remove_name_cache_by_handle(const Texture2DHandle& handle)
@@ -689,7 +729,7 @@ namespace INVENT
 		if (!handle.IsValid())
 			return;
 		std::unique_lock<std::shared_mutex> lock(_cache_mutex);
-		auto it = _texture_handle_name_cache->find(handle.handle.GetRealIndex());
+		auto it = _texture_handle_name_cache->find(handle.slot);
 		if (it != _texture_handle_name_cache->end())
 		{
 			_texture_name_cache->erase(it->second);   // 删除正向表项
@@ -880,46 +920,78 @@ namespace INVENT
 		return true;
 	}
 
-	bool IVulkanTexture2DManagement::_dxgi_to_bcn(uint32_t dxgi, VkFormat& fmt, uint32_t& bytesPerBlock)
+	bool IVulkanTexture2DManagement::_load_dds_to_compressed_data(const std::string& filepath, ITextureCompresser::CompressedTextureData& out, LodDDSType type)
 	{
-		switch (dxgi)
+		dds::Image image;
+		auto result = dds::readFile(filepath, &image);
+		if (result != dds::ReadResult::Success)
 		{
-		case 71: fmt = VK_FORMAT_BC1_RGB_UNORM_BLOCK; bytesPerBlock = 8;  return true;
-		case 72: fmt = VK_FORMAT_BC1_RGB_SRGB_BLOCK; bytesPerBlock = 8;  return true;
-		case 77: fmt = VK_FORMAT_BC3_UNORM_BLOCK;    bytesPerBlock = 16; return true;
-		case 78: fmt = VK_FORMAT_BC3_SRGB_BLOCK;     bytesPerBlock = 16; return true;
-		case 80: fmt = VK_FORMAT_BC4_UNORM_BLOCK;    bytesPerBlock = 8;  return true;
-		case 81: fmt = VK_FORMAT_BC4_SNORM_BLOCK;    bytesPerBlock = 8;  return true;
-		case 83: fmt = VK_FORMAT_BC5_UNORM_BLOCK;    bytesPerBlock = 16; return true;
-		case 84: fmt = VK_FORMAT_BC5_SNORM_BLOCK;    bytesPerBlock = 16; return true;
-		case 95: fmt = VK_FORMAT_BC6H_UFLOAT_BLOCK;  bytesPerBlock = 16; return true;
-		case 96: fmt = VK_FORMAT_BC6H_SFLOAT_BLOCK;  bytesPerBlock = 16; return true;
-		case 98: fmt = VK_FORMAT_BC7_UNORM_BLOCK;    bytesPerBlock = 16; return true;
-		case 99: fmt = VK_FORMAT_BC7_SRGB_BLOCK;     bytesPerBlock = 16; return true;
+			return false;
 		}
-		return false;
-	}
+		//INVENT_LOG_DEBUG(std::format("[texture test] image width: {}. height: {}.", image.width, image.height));
 
-	bool IVulkanTexture2DManagement::_load_dds_to_compressed_data(const std::string& filepath, ITools::CompressedTextureData& out)
-	{
-		std::ifstream in(filepath, std::ios::binary);
-		if (!in) return false;
+		if (!out) return false;
+		switch (type)
+		{
+		case INVENT::IVulkanTexture2DManagement::LodDDSType::BC1:
+			if (image.format != DXGI_FORMAT_BC1_UNORM_SRGB && image.format != DXGI_FORMAT_BC1_UNORM) return false;
+			break;
+		case INVENT::IVulkanTexture2DManagement::LodDDSType::BC3:
+			if (image.format != DXGI_FORMAT_BC3_UNORM_SRGB && image.format != DXGI_FORMAT_BC3_UNORM) return false;
+			break;
+		case INVENT::IVulkanTexture2DManagement::LodDDSType::BC4:
+			if (image.format != DXGI_FORMAT_BC4_SNORM && image.format != DXGI_FORMAT_BC4_UNORM) return false;
+			break;
+		case INVENT::IVulkanTexture2DManagement::LodDDSType::BC5:
+			if (image.format != DXGI_FORMAT_BC5_SNORM && image.format != DXGI_FORMAT_BC5_UNORM) return false;
+			break;
+		case INVENT::IVulkanTexture2DManagement::LodDDSType::BC6H:
+			if (image.format != DXGI_FORMAT_BC6H_UF16 && image.format != DXGI_FORMAT_BC6H_SF16) return false;
+			break;
+		case INVENT::IVulkanTexture2DManagement::LodDDSType::BC7:
+			if (image.format != DXGI_FORMAT_BC7_UNORM_SRGB && image.format != DXGI_FORMAT_BC7_UNORM) return false;
+			break;
+		default:
+			return false;
+		}
 
-		ITools::DDS_Header hdr{};
-		in.read(reinterpret_cast<char*>(&hdr), sizeof(hdr));
-		if (!in || hdr.dwMagic != 0x20534444 || hdr.dwSize != 124) return false;
+		/*INVENT_LOG_DEBUG(std::format("[texture test] image num mips: {}.", image.numMips));
+		INVENT_LOG_DEBUG(std::format("[texture test] image array size: {}.", image.arraySize));
+		INVENT_LOG_DEBUG(std::format("[texture test] image mipmaps size: {}.", image.mipmaps.size()));
+		uint32_t i = 0;
+		for (auto& mipmap : image.mipmaps)
+		{
+			INVENT_LOG_DEBUG(std::format("[texture test] image mip{} pixel count: {}.", i++, image.mipmaps[i].size()));
+		}*/
+		
+		if (image.arraySize != 1) return false;
+		
+		out.width = image.width;
+		out.height = image.height;
+		out.mipLevels = image.numMips;
+		out.offsets->resize(image.mipmaps.size());
+		size_t dataSize = 0;
+		for (size_t i = 0; i < image.mipmaps.size(); ++i)
+		{
+			(*out.offsets)[i] = static_cast<uint32_t>(dataSize);
+			dataSize += image.mipmaps[i].size();
+		}
+		out.data->resize(dataSize);
+		memcpy(out.data->data(), image.data.get(), dataSize);
+
+		//INVENT_LOG_DEBUG(std::format("[texture test] image data size: {}.", dataSize));
 
 		return true;
 	}
 
-	const IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::_find_handle_from_cache(const std::string& name) const
+	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::_find_handle_from_cache(const std::string& name) const
 	{
 		auto iter = _texture_name_cache->find(name);
 		if (iter != _texture_name_cache->end())
 		{
 			return iter->second;
 		}
-		return Texture2DHandle();
+		return Texture2DHandle{};
 	}
 
 
@@ -944,6 +1016,8 @@ namespace INVENT
 		texdata.offsets = ::new(offsetptr) ITextureCompresser::Uint32Vector{ IMemPoolAllocatorOnlyFixedBlock<uint32_t>(pool) };
 		ITextureCompresser::CompressTextureFRGBA(texdata, src_pixels1, { static_cast<uint32_t>(width1),static_cast<uint32_t>(height1) });
 
+		INVENT_LOG_DEBUG(std::format("[texture test] test compressed data size: {}.", texdata.data->size()));
+
 		// 準備 DDS 檔頭
 		ITools::DDS_Header dds_hdr;
 		dds_hdr.dwWidth = texdata.width;
@@ -964,6 +1038,8 @@ namespace INVENT
 
 		EngineAllocator::Deallocate(dataptr);
 		EngineAllocator::Deallocate(offsetptr);
+
+		_load_dds_to_compressed_data("Config/EngineAssets/image/test.png.dds", texdata, LodDDSType::BC6H);
 
 	}
 #endif // 1
