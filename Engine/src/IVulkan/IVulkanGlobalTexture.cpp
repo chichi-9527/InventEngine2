@@ -75,6 +75,12 @@ namespace INVENT
 	{
 		if (_is_valid) return false;
 
+		_transfer_queue = IVulkanBase::Base().GetTransferQueue();
+		if(_transfer_queue != VK_NULL_HANDLE)
+			INVENT_LOG_TRACE(std::format("[IVulkanTexture2DManagement] have transfer queue."));
+		else
+			INVENT_LOG_TRACE(std::format("[IVulkanTexture2DManagement] NO have transfer queue."));
+
 		auto textureCount = static_cast<size_t>(IVulkanBase::Base().GetCurrentBindlessDescriptorCount());
 		INVENT_LOG_INFO(std::format("[IVulkanTexture2DManagement] current bindless descriptor count: {}.", textureCount));
 
@@ -161,6 +167,7 @@ namespace INVENT
 	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& path,
 		TextureType texture_type, TextureCompressionType compression_type, std::uint32_t mip_levels)
 	{
+
 		std::string name = std::filesystem::path{ path }.filename().string();
 		if (name.empty())
 		{
@@ -175,6 +182,13 @@ namespace INVENT
 	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name, const std::string& path,
 		TextureType texture_type, TextureCompressionType compression_type, std::uint32_t mip_levels)
 	{
+		bool isDDS = false;
+		if (auto filePath = std::filesystem::path{ path }; filePath.has_extension())
+		{
+			if (filePath.extension().string() == ".dds")
+				isDDS = true;
+		}
+		
 		if (!std::filesystem::exists(path)) return Texture2DHandle{};
 
 		Texture2DHandle handle = _find_handle_from_cache(name);
@@ -187,6 +201,25 @@ namespace INVENT
 			return handle;
 		}
 
+		switch (texture_type)
+		{
+		case INVENT::TextureType::TYPE_Undefined:
+		case INVENT::TextureType::TYPE_Deffuse:
+			break;
+		case INVENT::TextureType::TYPE_Emission:
+			break;
+		case INVENT::TextureType::TYPE_Normal:
+			break;
+		case INVENT::TextureType::TYPE_SingleChannel:
+			break;
+		case INVENT::TextureType::TYPE_ORM:
+			break;
+		case INVENT::TextureType::TYPE_Data:
+			break;
+		default:
+			break;
+		}
+
 		auto pool = IEngineTools::Instance().GetMemPoolPool();
 		auto& data = _textures_data[handle.slot];
 		if (!data)
@@ -197,7 +230,10 @@ namespace INVENT
 			data.offsets = ::new(offsetptr) ITextureCompresser::Uint32Vector{ IMemPoolAllocatorOnlyFixedBlock<uint32_t>(pool) };
 		}
 
-		IEngineTools::Instance().GetWorkThreadPool()->Submit(0, [this, handle, path, texture_type, compression_type, mip_levels]() {
+		IEngineTools::Instance().GetWorkThreadPool()->Submit(0, [this, handle, name, path, texture_type, compression_type, mip_levels](bool is_dds) {
+			
+			
+
 			int width = 0, height = 0, channels = 0;
 			auto texData = stbi_load(path.c_str(), &width, &height, &channels, 4);
 
@@ -213,20 +249,7 @@ namespace INVENT
 
 			}
 
-			switch (texture_type)
-			{
-			case INVENT::TextureType::TYPE_Undefined:
-			case INVENT::TextureType::TYPE_Color:
-				break;
-			case INVENT::TextureType::TYPE_Normal:
-				break;
-			case INVENT::TextureType::TYPE_SingleChannel:
-				break;
-			case INVENT::TextureType::TYPE_Data:
-				break;
-			default:
-				break;
-			}
+
 
 			if (texture_type == TextureType::TYPE_Data)
 			{
@@ -296,7 +319,7 @@ namespace INVENT
 			//	_textures[handle.handle.GetRealIndex()] = { image,imageView,textureFormat,std::uint64_t{0},static_cast<uint32_t>(width),static_cast<uint32_t>(height),levelCount };
 			//}
 			//_bit_vector_valid.SetValue<true>(handle.handle);
-			});
+			}, isDDS);
 
 		 _insert_name_cache(name, handle);
 		return handle;
@@ -567,10 +590,10 @@ namespace INVENT
 		uint32_t whitePixel = 0xFFFFFFFF;
 		uint32_t blackPixel = 0xFF000000;
 		uint32_t normalPixel = 0xFFFF8080;
-		uint32_t transparentPixel = 0x00FFFFFF;
-
-		constexpr VkDeviceSize DefaultSingleImageSize = static_cast<VkDeviceSize>(1) * 1 * 4;
-		constexpr VkDeviceSize stagingBufferSize = DefaultSingleImageSize * DefaultTextureType::DefaultCount;
+		uint32_t ormPixel = 0xFF0080FF;
+		uint8_t roughnessPixel = 0x80;
+		
+		constexpr VkDeviceSize stagingBufferSize = sizeof(uint32_t) * 4 + sizeof(uint8_t);
 
 		VkBuffer stagingBuffer;
 		void* data;
@@ -583,15 +606,17 @@ namespace INVENT
 			throw std::runtime_error("failed to load staging buffer! : _init_default_image");
 		}
 
-		uint32_t pixels[] = { whitePixel,blackPixel,normalPixel,transparentPixel };
-		memcpy(data, pixels, static_cast<size_t>(stagingBufferSize));
+		uint32_t pixels[] = { whitePixel,blackPixel,normalPixel,ormPixel };
+		memcpy(data, pixels, sizeof(uint32_t) * 4);
+		reinterpret_cast<uint8_t*>(data)[sizeof(uint32_t) * 4] = roughnessPixel;
+
 		if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
 		{
 			throw std::runtime_error("failed to flush buffer allocation!");
 		}
 
 		// white
-		VkImage whiteImage;
+		VkImage whiteImageSRGB;
 		IVulkanBase::Base().UseVmaCreateImage(1,
 			1,
 			1,
@@ -599,27 +624,53 @@ namespace INVENT
 			VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 			0,
-			whiteImage);
+			whiteImageSRGB);
 		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			whiteImage,
+			whiteImageSRGB,
 			VK_FORMAT_R8G8B8A8_SRGB,
 			1,
 			1,
 			1,
 			0);
-		VkImageView whiteImageView = IVulkanBase::Base().CreateImageView(whiteImage,
+		VkImageView whiteImageViewSRGB = IVulkanBase::Base().CreateImageView(whiteImageSRGB,
 			VK_FORMAT_R8G8B8A8_SRGB,
 			VK_IMAGE_ASPECT_COLOR_BIT,
 			VK_IMAGE_VIEW_TYPE_2D,
 			1);
-		if (whiteImageView == VK_NULL_HANDLE)
+		if (whiteImageViewSRGB == VK_NULL_HANDLE)
 		{
 			throw std::runtime_error("failed to create texture image view! white pixel");
 		}
-		_default_textures[DefaultTextureType::White] = { whiteImage,whiteImageView,0 };
+		_default_textures[DefaultTextureType::S_White] = { whiteImageSRGB,whiteImageViewSRGB,0 };
+		VkImage whiteImageUNORM;
+		IVulkanBase::Base().UseVmaCreateImage(1,
+			1,
+			1,
+			VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			0,
+			whiteImageUNORM);
+		_upload_texture_and_generate_mipmaps(stagingBuffer,
+			whiteImageUNORM,
+			VK_FORMAT_R8G8B8A8_UNORM,
+			1,
+			1,
+			1,
+			0);
+		VkImageView whiteImageViewUNORM = IVulkanBase::Base().CreateImageView(whiteImageUNORM,
+			VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_VIEW_TYPE_2D,
+			1);
+		if (whiteImageViewUNORM == VK_NULL_HANDLE)
+		{
+			throw std::runtime_error("failed to create texture image view! white pixel");
+		}
+		_default_textures[DefaultTextureType::U_White] = { whiteImageUNORM,whiteImageViewUNORM,0 };
 
 		// black
-		VkImage blackImage;
+		VkImage blackImageSRGB;
 		IVulkanBase::Base().UseVmaCreateImage(1,
 			1,
 			1,
@@ -627,24 +678,50 @@ namespace INVENT
 			VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 			0,
-			blackImage);
+			blackImageSRGB);
 		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			blackImage,
+			blackImageSRGB,
 			VK_FORMAT_R8G8B8A8_SRGB,
 			1,
 			1,
 			1,
-			DefaultSingleImageSize);
-		VkImageView blackImageView = IVulkanBase::Base().CreateImageView(blackImage,
+			sizeof(uint32_t));
+		VkImageView blackImageViewSRGB = IVulkanBase::Base().CreateImageView(blackImageSRGB,
 			VK_FORMAT_R8G8B8A8_SRGB,
 			VK_IMAGE_ASPECT_COLOR_BIT,
 			VK_IMAGE_VIEW_TYPE_2D,
 			1);
-		if (blackImageView == VK_NULL_HANDLE)
+		if (blackImageViewSRGB == VK_NULL_HANDLE)
 		{
 			throw std::runtime_error("failed to create texture image view! white pixel");
 		}
-		_default_textures[DefaultTextureType::Black] = { blackImage,blackImageView,0 };
+		_default_textures[DefaultTextureType::S_Black] = { blackImageSRGB,blackImageViewSRGB,0 };
+		VkImage blackImageUNORM;
+		IVulkanBase::Base().UseVmaCreateImage(1,
+			1,
+			1,
+			VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			0,
+			blackImageUNORM);
+		_upload_texture_and_generate_mipmaps(stagingBuffer,
+			blackImageUNORM,
+			VK_FORMAT_R8G8B8A8_UNORM,
+			1,
+			1,
+			1,
+			sizeof(uint32_t));
+		VkImageView blackImageViewUNORM = IVulkanBase::Base().CreateImageView(blackImageUNORM,
+			VK_FORMAT_R8G8B8A8_UNORM,
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_VIEW_TYPE_2D,
+			1);
+		if (blackImageViewUNORM == VK_NULL_HANDLE)
+		{
+			throw std::runtime_error("failed to create texture image view! white pixel");
+		}
+		_default_textures[DefaultTextureType::U_Black] = { blackImageUNORM,blackImageViewUNORM,0 };
 
 		// normal
 		VkImage normalImage;
@@ -662,7 +739,7 @@ namespace INVENT
 			1,
 			1,
 			1,
-			DefaultSingleImageSize * 2);
+			sizeof(uint32_t) * 2);
 		VkImageView normalImageView = IVulkanBase::Base().CreateImageView(normalImage,
 			VK_FORMAT_R8G8B8A8_UNORM,
 			VK_IMAGE_ASPECT_COLOR_BIT,
@@ -674,33 +751,61 @@ namespace INVENT
 		}
 		_default_textures[DefaultTextureType::NormalBlue] = { normalImage,normalImageView,0 };
 
-		// transparent
-		VkImage transparentImage;
+		// ORM
+		VkImage ORMImage;
 		IVulkanBase::Base().UseVmaCreateImage(1,
 			1,
 			1,
-			VK_FORMAT_R8G8B8A8_SRGB,
+			VK_FORMAT_R8G8B8A8_UNORM,
 			VK_IMAGE_TILING_OPTIMAL,
 			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 			0,
-			transparentImage);
+			ORMImage);
 		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			transparentImage,
-			VK_FORMAT_R8G8B8A8_SRGB,
+			ORMImage,
+			VK_FORMAT_R8G8B8A8_UNORM,
 			1,
 			1,
 			1,
-			DefaultSingleImageSize * 3);
-		VkImageView transparentImageView = IVulkanBase::Base().CreateImageView(transparentImage,
-			VK_FORMAT_R8G8B8A8_SRGB,
+			sizeof(uint32_t) * 3);
+		VkImageView ORMImageView = IVulkanBase::Base().CreateImageView(ORMImage,
+			VK_FORMAT_R8G8B8A8_UNORM,
 			VK_IMAGE_ASPECT_COLOR_BIT,
 			VK_IMAGE_VIEW_TYPE_2D,
 			1);
-		if (transparentImageView == VK_NULL_HANDLE)
+		if (ORMImageView == VK_NULL_HANDLE)
 		{
 			throw std::runtime_error("failed to create texture image view! white pixel");
 		}
-		_default_textures[DefaultTextureType::Transparent] = { transparentImage,transparentImageView,0 };
+		_default_textures[DefaultTextureType::ORM] = { ORMImage,ORMImageView,0 };
+
+		// u8 roughness
+		VkImage RImage;
+		IVulkanBase::Base().UseVmaCreateImage(1,
+			1,
+			1,
+			VK_FORMAT_R8_UNORM,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			0,
+			RImage);
+		_upload_texture_and_generate_mipmaps(stagingBuffer,
+			RImage,
+			VK_FORMAT_R8_UNORM,
+			1,
+			1,
+			1,
+			sizeof(uint32_t) * 4);
+		VkImageView RImageView = IVulkanBase::Base().CreateImageView(RImage,
+			VK_FORMAT_R8_UNORM,
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			VK_IMAGE_VIEW_TYPE_2D,
+			1);
+		if (RImageView == VK_NULL_HANDLE)
+		{
+			throw std::runtime_error("failed to create texture image view! white pixel");
+		}
+		_default_textures[DefaultTextureType::U8_Roughness] = { RImage,RImageView,0 };
 
 		IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
 	}

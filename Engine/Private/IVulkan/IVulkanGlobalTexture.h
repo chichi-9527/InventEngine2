@@ -30,9 +30,11 @@ namespace INVENT
 	enum class TextureType : uint32_t
 	{
 		TYPE_Undefined = 0,
-		TYPE_Color,				// diffuse / emission
+		TYPE_Deffuse,			// diffuse 
+		TYPE_Emission,			// emission
 		TYPE_Normal,			// normal BC5
-		TYPE_SingleChannel,		// roughness / ao / opacity
+		TYPE_SingleChannel,		// roughness / ao / opacity / metallic
+		TYPE_ORM,				// R=AO, G=Roughness, B=Metallic
 		TYPE_Data				// specular / clear coat
 	};
 	enum class TextureCompressionType : uint32_t {
@@ -66,10 +68,13 @@ namespace INVENT
 
 		enum DefaultTextureType : uint32_t 
 		{
-			White = 0,
-			Black,
-			NormalBlue,
-			Transparent,
+			S_White = 0,		// R, G, B, A (Identity)
+			U_White,			// R, G, B, A (Identity)
+			S_Black,			// R, G, B, A (Identity)
+			U_Black,			// R, G, B, A (Identity)
+			NormalBlue,			// R, G, ONE, ONE (扩展)
+			ORM,				// R, G, B, A (Identity)
+			U8_Roughness,		// R, R, R, ONE (扩展)
 			DefaultCount
 		};
 
@@ -218,6 +223,7 @@ namespace INVENT
 
 		std::vector<ITextureCompresser::CompressedTextureData> _textures_data;
 
+		VkQueue _transfer_queue = VK_NULL_HANDLE;
 
 		IBitVectorSafe _bit_vector_used{};
 		IBitVectorSafe _bit_vector_valid{};
@@ -232,6 +238,6 @@ namespace INVENT
 		TextureHandleNameMap* _texture_handle_name_cache = nullptr;
 
 		bool _is_valid = false;
-
+		
 	};
 }
