@@ -225,7 +225,8 @@ namespace INVENT
 			return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
 				&& deviceFeatures.geometryShader
 				&& deviceFeatures.samplerAnisotropy
-				&& _queue_family_indices.IsComplete()
+				&& _queue_family_indices.IsComplete() 
+				&& _queue_family_indices.HasTransferFamily // 必须有专业传输队列,若要实现同步传输,请更改
 				&& _check_device_extension_support(device)
 				&& swapChainAdequate();
 			};
@@ -239,15 +240,17 @@ namespace INVENT
 			}
 		}
 
-		if (_physical_device == VK_NULL_HANDLE)
-		{
-			INVENT_LOG_ERROR("[VulkanBase] failed to find a suitable GPU!");
-			return false;
-		}
-
 		INVENT_LOG_INFO("[VulkanBase] pick physical devic done.");
 		INVENT_LOG_INFO(std::format("[VulkanBase] device name : {}.", _physical_device_properties.deviceName));
 		INVENT_LOG_INFO(std::format("[VulkanBase] 是否有专用传输队列 : {}.", _queue_family_indices.HasTransferFamily ? "是" : "否"));
+
+		if (_physical_device == VK_NULL_HANDLE)
+		{
+			INVENT_LOG_ERROR("[VulkanBase] failed to find a suitable GPU!");
+			INVENT_LOG_ERROR("[VulkanBase] 可能没有专业传输队列,请务必保证存在专业的传输队列.");
+			return false;
+		}
+		
 		_get_all_properties();
 		INVENT_LOG_INFO(std::format("[VulkanBase] device maximum number of sampled image descriptors : {}.", _descriptor_indexing_properties.maxPerStageDescriptorUpdateAfterBindSampledImages));
 
@@ -658,6 +661,19 @@ namespace INVENT
 		{
 			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create command pool! VkResult: {}.", static_cast<int32_t>(result)));
 			return false;
+		}
+
+		if (_queue_family_indices.HasTransferFamily)
+		{
+			VkCommandPoolCreateInfo TransPoolInfo{};
+			TransPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+			TransPoolInfo.queueFamilyIndex = _queue_family_indices.TransferFamily;
+			TransPoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+			if (VkResult result = vkCreateCommandPool(_device, &TransPoolInfo, nullptr, &_transfer_command_pool))
+			{
+				INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create transfer command pool! VkResult: {}.", static_cast<int32_t>(result)));
+				return false;
+			}
 		}
 
 		return true;
@@ -1246,10 +1262,35 @@ namespace INVENT
 		imageViewCreateInfo.image = image;
 		imageViewCreateInfo.viewType = view_type;
 		imageViewCreateInfo.format = format;
-		imageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		imageViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		imageViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+		switch (format)
+		{
+		case VK_FORMAT_R8_UNORM:
+		case VK_FORMAT_R8_SNORM:
+		case VK_FORMAT_R8_SRGB: 
+		case VK_FORMAT_BC4_UNORM_BLOCK:
+		case VK_FORMAT_BC4_SNORM_BLOCK: 
+			imageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+			imageViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_R;
+			imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_R;
+			imageViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_ONE;
+			break;
+		case VK_FORMAT_R8G8_UNORM:
+		case VK_FORMAT_R8G8_SNORM:
+		case VK_FORMAT_R8G8_SRGB:
+		case VK_FORMAT_BC5_UNORM_BLOCK:
+		case VK_FORMAT_BC5_SNORM_BLOCK:
+			imageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+			imageViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_G;
+			imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_ONE;
+			imageViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_ONE;
+			break;
+		default:
+			imageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+			imageViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+			imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+			imageViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+			break;
+		}
 		imageViewCreateInfo.subresourceRange.aspectMask = aspect_flags;
 		imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
 		imageViewCreateInfo.subresourceRange.levelCount = mip_levels;
@@ -1341,6 +1382,14 @@ namespace INVENT
 				indices.HasPresentFamily = true;
 			}
 
+			if (indices.IsComplete()) break;
+
+			i++;
+		}
+
+		i = 0;
+		for (const auto& queueFamily : queueFamilies)
+		{
 			if ((queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
 				!(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT))
 			{
@@ -1348,7 +1397,7 @@ namespace INVENT
 				indices.HasTransferFamily = true;
 			}
 
-			if (indices.IsComplete() && indices.HasTransferFamily) break;
+			if (indices.HasTransferFamily) break;
 
 			i++;
 		}

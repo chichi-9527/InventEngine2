@@ -167,6 +167,7 @@ namespace INVENT
 		void UseVmaUnmapMemory(VkBuffer buffer);
 		VmaAllocator GetVmaAllocator() const;
 
+		VkQueue GetTransferQueue() const { return _transfer_queue; }
 		VkFormat GetSwapChainImageFormat() const { return _swap_chain_image_format; }
 		VkFormat GetDepthFormat() const { return _depth_format; }
 		VkFormat GetShadowDepthFormat() const { return _shadow_depth_format; }
@@ -213,6 +214,7 @@ namespace INVENT
 		std::vector<VkDescriptorSetLayout> _descriptor_set_layouts;
 		VkDescriptorSet  _global_bindless_descriptor_set = VK_NULL_HANDLE;
 		VkCommandPool _command_pool = VK_NULL_HANDLE;
+		VkCommandPool _transfer_command_pool = VK_NULL_HANDLE;
 
 		VkPhysicalDeviceDescriptorIndexingProperties _descriptor_indexing_properties{};
 		VkPhysicalDeviceDescriptorIndexingFeaturesEXT _enabled_indexing_features{};
