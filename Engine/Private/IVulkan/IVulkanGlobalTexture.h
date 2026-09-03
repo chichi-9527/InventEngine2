@@ -33,25 +33,13 @@ namespace INVENT
 		TYPE_Deffuse,			// diffuse 
 		TYPE_Emission,			// emission
 		TYPE_Normal,			// normal BC5
-		TYPE_SingleChannel,		// roughness / ao / opacity / metallic
+		TYPE_Roughness,			// roughness 
+		TYPE_AO,				// ao 
+		TYPE_Opacity,			// opacity 
+		TYPE_Metallic,			// metallic
 		TYPE_ORM,				// R=AO, G=Roughness, B=Metallic
-		TYPE_Data				// specular / clear coat
-	};
-	enum class TextureCompressionType : uint32_t {
-		NoCompression = 0,
-		Auto,					// 根据 alpha 通道自动选择
-		BC1_RGB_UNORM = 71,
-		BC1_RGB_SRGB = 72,
-		BC3_UNORM = 77,
-		BC3_SRGB = 78,
-		BC4_UNORM = 80,
-		BC4_SNORM = 81,
-		BC5_UNORM = 83,
-		BC5_SNORM = 84,
-		BC6H_UFLOAT = 95,
-		BC6H_SFLOAT = 96,
-		BC7_UNORM = 98,
-		BC7_SRGB = 99
+		TYPE_Specular,			// specular 
+		TYPE_ClearCoat			// clear coat
 	};
 
 	template<typename T>
@@ -74,8 +62,19 @@ namespace INVENT
 			U_Black,			// R, G, B, A (Identity)
 			NormalBlue,			// R, G, ONE, ONE (扩展)
 			ORM,				// R, G, B, A (Identity)
-			U8_Roughness,		// R, R, R, ONE (扩展)
+			U8_128,				// R, R, R, ONE (扩展)
 			DefaultCount
+		};
+
+		enum class TextureCompressionType : uint32_t {
+			NoCompression = 0,
+			Auto,					// 根据 alpha 通道自动选择
+			BC1,
+			BC3,
+			BC4,
+			BC5,
+			BC6H,
+			BC7
 		};
 
 		struct Texture2DHandle
@@ -99,8 +98,9 @@ namespace INVENT
 
 	private:
 
-		enum class LodDDSType : uint32_t 
+		enum class LoadDDSType : uint32_t 
 		{
+			Auto,
 			BC1,
 			BC3,
 			BC4,
@@ -208,11 +208,15 @@ namespace INVENT
 		bool _save_dds_texture(const std::string& path, const std::string& filename,
 			const ITools::DDS_Header& header, const ITools::DDS_Header_DX10& header_dx10, const uint8_t* data, size_t data_size);
 
-		bool _load_dds_to_compressed_data(const std::string& filepath, ITextureCompresser::CompressedTextureData& out, LodDDSType type);
+		bool _load_dds_to_compressed_data(const std::string& filepath,
+			LoadDDSType type,
+			ITextureCompresser::CompressedTextureData& out,
+			TextureCompressionType* dds_type = nullptr);
 
 		Texture2DHandle _find_handle_from_cache(const std::string& name) const;
+		VkFormat _get_format_from_type(TextureType tex_type, TextureCompressionType com_type) const;
 
-#if 1
+#if 0
 		void _test();
 #endif // 1
 
@@ -221,7 +225,12 @@ namespace INVENT
 		std::vector<IVulkanTexture2DHandle> _default_textures;
 		std::vector<IVulkanTexture2DHandle> _textures;
 
-		std::vector<ITextureCompresser::CompressedTextureData> _textures_data;
+		struct TextureData
+		{
+			ITextureCompresser::CompressedTextureData Data;
+			VkFormat Format = VK_FORMAT_UNDEFINED;
+		};
+		std::vector<TextureData> _textures_data;
 
 		VkQueue _transfer_queue = VK_NULL_HANDLE;
 
