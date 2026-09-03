@@ -877,8 +877,7 @@ namespace INVENT
 
 	void IVulkanBase::UpdateBindlessTextureSlot(uint32_t slot_id, VkImageView texture_image_view)
 	{
-		if (slot_id == 0 ||
-			slot_id >= _current_descriptor_count ||
+		if (slot_id >= _current_descriptor_count ||
 			texture_image_view == VK_NULL_HANDLE)
 			return;
 
