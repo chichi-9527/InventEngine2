@@ -22,26 +22,6 @@ namespace INVENT
 		
 	}
 
-
-	/*
-	* SRGB:  擴散貼圖 (Diffuse Map) 基礎顏色貼圖 (Albedo Map) 反射貼圖 (Specular Map)
-	* UNORM: 法線貼圖 (Normal Map) 粗糙度貼圖 (Roughness Map) 金屬度貼圖 (Metalic Map) 遮蔽貼圖 (AO Map)
-	*/
-	enum class TextureType : uint32_t
-	{
-		TYPE_Undefined = 0,
-		TYPE_Deffuse,			// diffuse 
-		TYPE_Emission,			// emission
-		TYPE_Normal,			// normal BC5
-		TYPE_Roughness,			// roughness 
-		TYPE_AO,				// ao 
-		TYPE_Opacity,			// opacity 
-		TYPE_Metallic,			// metallic
-		TYPE_ORM,				// R=AO, G=Roughness, B=Metallic
-		TYPE_Specular,			// specular 
-		TYPE_ClearCoat			// clear coat
-	};
-
 	template<typename T>
 	class IMemPoolAllocatorOnlyFixedBlock;
 
@@ -52,6 +32,26 @@ namespace INVENT
 		{
 			VkImage Image = VK_NULL_HANDLE;
 			VkImageView ImageView = VK_NULL_HANDLE;
+		};
+
+		// .hdr stb image stbi_loadf
+		/*
+		* SRGB:  擴散貼圖 (Diffuse Map) 基礎顏色貼圖 (Albedo Map) 反射貼圖 (Specular Map)
+		* UNORM: 法線貼圖 (Normal Map) 粗糙度貼圖 (Roughness Map) 金屬度貼圖 (Metalic Map) 遮蔽貼圖 (AO Map)
+		*/
+		enum class TextureType : uint32_t
+		{
+			TYPE_Undefined = 0,
+			TYPE_Deffuse,			// diffuse 
+			TYPE_Emission,			// emission
+			TYPE_Normal,			// normal BC5
+			TYPE_Roughness,			// roughness 
+			TYPE_AO,				// ao 
+			TYPE_Opacity,			// opacity 
+			TYPE_Metallic,			// metallic
+			TYPE_ORM,				// R=AO, G=Roughness, B=Metallic
+			TYPE_Specular,			// specular 
+			TYPE_ClearCoat			// clear coat
 		};
 
 		enum DefaultTextureType : uint32_t 
@@ -66,15 +66,14 @@ namespace INVENT
 			DefaultCount
 		};
 
-		enum class TextureCompressionType : uint32_t {
-			NoCompression = 0,
-			Auto,					// 根据 alpha 通道自动选择
-			BC1,
-			BC3,
-			BC4,
-			BC5,
-			BC6H,
-			BC7
+		enum class CompressionType : uint32_t {
+			BC1 = 2,
+			BC3 = 4,
+			BC4 = 5,
+			BC5 = 6,
+			BC6H = 7,
+			BC7_RGB = 8,
+			BC7_RGBA = 9
 		};
 
 		struct Texture2DHandle
@@ -126,6 +125,13 @@ namespace INVENT
 	public:
 		~IVulkanTexture2DManagement() = default;
 
+		// STATIC
+
+		static std::uint32_t GetDXGIFormatFromTypes(TextureType tex_type, CompressionType& com_type);
+
+
+		///////////////////
+		
 		static IVulkanTexture2DManagement& Instance();
 		bool Init();
 		// 清除所有标识符，释放所有 VkImage/VkImageView
@@ -136,53 +142,20 @@ namespace INVENT
 
 
 		Texture2DHandle AllocateTextureHandle();
+		/// <param name="name"> 唯一纹理名,每次添加纹理会判断是否存在此纹理 </param>
+		/// <param name="path"> dds 文件路径,只会加载2d纹理的 BC1/3/4/5/6H/7 压缩方式的纹理,否则加载失败,但会返回有效句柄 </param>
 		/// <returns> 失败时会返回无效的句柄 </returns>
-		Texture2DHandle AddTexture2D(const std::string& path,
-			TextureType texture_type = TextureType::TYPE_Undefined,
-			TextureCompressionType compression_type = TextureCompressionType::Auto,
-			std::uint32_t mip_levels = 0);
-		/// <returns> 失败时会返回无效的句柄 </returns>
-		Texture2DHandle AddTexture2D(const std::string& name,
-			const std::string& path,
-			TextureType texture_type = TextureType::TYPE_Undefined,
-			TextureCompressionType compression_type = TextureCompressionType::Auto,
-			std::uint32_t mip_levels = 0);
-		/// <returns> 失败时会返回无效的句柄 </returns>
-		Texture2DHandle AddTexture2D(const std::string& name,
-			VkImage image, VkImageView image_view,
-			std::uint32_t width, std::uint32_t height, std::uint32_t mip_levels = 1,
-			VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
-		Texture2DHandle UpdateTexture2D(Texture2DHandle& handle, const std::string& path, TextureType texture_type = TextureType::TYPE_Undefined, bool is_create_mipmaps = true);
-		// 自动销毁 VkImage 与 VkImageView
-		Texture2DHandle UpdateTexture2D(Texture2DHandle& handle,
-			VkImage image, VkImageView image_view,
-			std::uint32_t width, std::uint32_t height, std::uint32_t mip_levels = 1,
-			VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
-		// 不自动销毁 VkImage 与 VkImageView
-		Texture2DHandle UpdateTexture2DWithoutDestory(Texture2DHandle& handle,
-			VkImage image, VkImageView image_view,
-			std::uint32_t width, std::uint32_t height, std::uint32_t mip_levels = 1,
-			VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
-		void DestroyTexture2D(Texture2DHandle& handle);
+		Texture2DHandle AddTexture2D(const std::string& name, const std::string& path, TextureType texture_type);
 
-		bool IsTextureReady(const Texture2DHandle& handle) const;
+		void UpdateTexture2D(Texture2DHandle& handle, std::uint32_t needMipLevel);
+
+		void DestroyTexture2D(Texture2DHandle handle);
+
 		bool IsValid() const { return _is_valid; }
-
-		IVulkanTexture2DHandle GetVulkanTextureHandle(const Texture2DHandle& handle) const;
-		
+	
 		void QueueDestroy(VkImage image, VkImageView image_view);
 		void FlushDestroyQueue();
-		void UploadTextureAndGenerateMipmaps(VkBuffer staging_buffer,
-			VkImage tex_image,
-			VkFormat trans_format,
-			uint32_t width,
-			uint32_t height,
-			uint32_t level_count = 1,
-			VkDeviceSize buffer_offset = 0,
-			VkImageLayout initial_layout = VK_IMAGE_LAYOUT_UNDEFINED)
-		{
-			_upload_texture_and_generate_mipmaps(staging_buffer, tex_image, trans_format, width, height, level_count, buffer_offset, initial_layout);
-		}
+
 	private:
 		void _init_default_image();
 		void _init_other();
@@ -211,10 +184,9 @@ namespace INVENT
 		bool _load_dds_to_compressed_data(const std::string& filepath,
 			LoadDDSType type,
 			ITextureCompresser::CompressedTextureData& out,
-			TextureCompressionType* dds_type = nullptr);
+			VkFormat& format);
 
 		Texture2DHandle _find_handle_from_cache(const std::string& name) const;
-		VkFormat _get_format_from_type(TextureType tex_type, TextureCompressionType com_type) const;
 
 #if 0
 		void _test();
