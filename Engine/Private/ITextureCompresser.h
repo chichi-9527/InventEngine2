@@ -18,11 +18,11 @@ namespace INVENT
 		using FloatVector = std::vector<float, IMemPoolAllocatorOnlyFixedBlock<float>>;
 
 		enum class TextureCompressionType : std::uint32_t {
-			Undefined,
-			BC1,
-			BC3,
-			BC7_RGB,
-			BC7_RGBA,
+			Undefined = 0,
+			BC1 = 2,
+			BC3 = 4,
+			BC7_RGB = 8,
+			BC7_RGBA = 9,
 		};
 		struct CompressedTextureData
 		{
@@ -36,13 +36,8 @@ namespace INVENT
 			operator bool() const noexcept
 			{
 				return data != nullptr &&
-					offsets != nullptr &&
-					_is_valid;
+					offsets != nullptr;
 			}
-		private:
-			friend class IVulkanTexture2DManagement;
-			friend class ITextureCompresser;
-			bool					_is_valid = false;
 		};
 		struct TextureSize 
 		{

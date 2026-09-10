@@ -130,7 +130,6 @@ namespace INVENT
 
 		}
 
-		out._is_valid = true;
 		return true;
 	}
 
@@ -219,7 +218,6 @@ namespace INVENT
 
 		}
 
-		out._is_valid = true;
 		return true;
 	}
 
@@ -308,7 +306,6 @@ namespace INVENT
 
 		}
 
-		out._is_valid = true;
 		return true;
 	}
 
@@ -415,7 +412,6 @@ namespace INVENT
 
 		}
 
-		out._is_valid = true;
 		return true;
 	}
 
