@@ -231,15 +231,16 @@ namespace INVENT
 
 		std::unique_lock<std::shared_mutex> lock(_size_cache_mutex);
 		auto iter = _size_cache->find(reinterpret_cast<std::uint64_t>(image));
-		if (iter != _size_cache->end()) // pool
-		{
-			_size_cache->erase(iter);
-		}
-		else // Dedicated
+		if (iter != _size_cache->end()) // Dedicated
 		{
 			auto allocatedSize = iter->second;
+			_size_cache->erase(iter);
 			if (_current_total_texture_memory >= allocatedSize) _current_total_texture_memory -= allocatedSize;
 			else _current_total_texture_memory = 0;
+		}
+		else // pool
+		{
+			
 		}
 
 		IVulkanBase::Base().UseVmaDestroyImage(image);
