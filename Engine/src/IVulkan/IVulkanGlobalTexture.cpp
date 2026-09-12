@@ -337,7 +337,7 @@ namespace INVENT
 		std::string texName = name;
 		if (name.empty())
 		{
-			INVENT_LOG_WARNING(std::format("name is empty; path : {}", path));
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] name is empty; path : {}", path));
 			texName = "Empty";
 		}
 
@@ -347,7 +347,7 @@ namespace INVENT
 		handle = AllocateTextureHandle();
 		if (!handle.IsValid())
 		{
-			INVENT_LOG_ERROR("纹理数量已达到上限.");
+			INVENT_LOG_ERROR("[IVulkanTexture2DManagement] 纹理数量已达到上限.");
 			return handle;
 		}
 
@@ -394,7 +394,7 @@ namespace INVENT
 
 		if (!std::filesystem::exists(path))
 		{
-			INVENT_LOG_WARNING(std::format("texture is not found; path : {}", path));
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] texture is not found; path : {}", std::filesystem::path{ IEngineTools::GetRunStdPath() / path }.string()));
 			return handle;
 		}
 
@@ -423,7 +423,7 @@ namespace INVENT
 
 			if (!_load_dds_to_compressed_data(path, LoadDDSType::Auto, td.Data, td.Format))
 			{
-				INVENT_LOG_WARNING(std::format("读取dds文件出现了错误,路径: {}", path));
+				INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] 读取dds文件出现了错误,路径: {}", std::filesystem::path{ IEngineTools::GetRunStdPath() / path }.string()));
 				return;
 			}
 
@@ -434,7 +434,7 @@ namespace INVENT
 			_bit_vector_valid.SetValue<true>(IHandle{ handle.slot });
 			lock.unlock();
 
-			INVENT_LOG_TRACE(std::format("read dds file done. path: {}", path));
+			INVENT_LOG_TRACE(std::format("[IVulkanTexture2DManagement] read dds file done. path: {}", std::filesystem::path{ IEngineTools::GetRunStdPath() / path }.string()));
 
 			// 自动驻留最粗层 (约一个 BC 块, 代价可忽略), 保证贴图不再是占位符;
 			// 之后真实需求由视锥裁剪 CS 的反馈或 UpdateTexture2D 驱动
@@ -656,7 +656,7 @@ namespace INVENT
 				VK_IMAGE_VIEW_TYPE_2D, c.total_mips - c.new_base);
 			if (view == VK_NULL_HANDLE)
 			{
-				INVENT_LOG_ERROR("[Streaming] 创建窗口 ImageView 失败!");
+				INVENT_LOG_ERROR("[IVulkanTexture2DManagement] [Streaming] 创建窗口 ImageView 失败!");
 				QueueDestroy(c.image, VK_NULL_HANDLE);
 				continue;
 			}
@@ -794,7 +794,7 @@ namespace INVENT
 			}
 			if (!valid)
 			{
-				INVENT_LOG_WARNING(std::format("[Streaming] slot {} 的 DDS 数据异常, 放弃本次上传.", slot));
+				INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] [Streaming] slot {} 的 DDS 数据异常, 放弃本次上传.", slot));
 				std::uint32_t t = target;
 				s.TargetBase.compare_exchange_strong(t, UINT32_MAX);
 				continue;
@@ -808,7 +808,7 @@ namespace INVENT
 			VkImage image = VK_NULL_HANDLE;
 			if (VkResult r = TexMemManager::CreateVkImage(image, info))
 			{
-				INVENT_LOG_WARNING(std::format("[Streaming] 创建窗口 VkImage 失败(显存预算?), slot {}, VkResult {}.",
+				INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] [Streaming] 创建窗口 VkImage 失败(显存预算?), slot {}, VkResult {}.",
 					slot, static_cast<std::int32_t>(r)));
 				std::uint32_t t = target;
 				s.TargetBase.compare_exchange_strong(t, UINT32_MAX);	// 下帧重试
@@ -824,7 +824,7 @@ namespace INVENT
 			_upload_fences.empty() || _pending_windows.empty())
 		{
 			if (!_pending_windows.empty())
-				_abandon_pending_windows("传输资源不可用");
+				_abandon_pending_windows("[IVulkanTexture2DManagement] 传输资源不可用");
 			return;
 		}
 
@@ -834,7 +834,7 @@ namespace INVENT
 		// 1) 等待 N 轮前使用同一块 staging 的传输完成 (顺带释放上一轮命令缓冲 + 冲刷完成项)
 		if (!_wait_round_fence(pool))
 		{
-			_abandon_pending_windows("fence 等待失败");
+			_abandon_pending_windows("[IVulkanTexture2DManagement] fence 等待失败");
 			return;
 		}
 
@@ -844,7 +844,7 @@ namespace INVENT
 		VkCommandBuffer cmd = _begin_transfer_command();
 		if (cmd == VK_NULL_HANDLE)
 		{
-			_abandon_pending_windows("命令缓冲分配失败");
+			_abandon_pending_windows("[IVulkanTexture2DManagement] 命令缓冲分配失败");
 			return;
 		}
 
@@ -967,7 +967,7 @@ namespace INVENT
 		// 提交前必须结束录制
 		if (VkResult r = vkEndCommandBuffer(cmd))
 		{
-			INVENT_LOG_ERROR(std::format("[Streaming] vkEndCommandBuffer 失败! VkResult: {}.", static_cast<std::int32_t>(r)));
+			INVENT_LOG_ERROR(std::format("[IVulkanTexture2DManagement] [Streaming] vkEndCommandBuffer 失败! VkResult: {}.", static_cast<std::int32_t>(r)));
 			vkFreeCommandBuffers(device, _transfer_command_pool, 1, &cmd);	// 非 pending, 安全
 			_abandon_pending_windows("vkEndCommandBuffer 失败");
 			return;
@@ -987,7 +987,7 @@ namespace INVENT
 		}
 		else
 		{
-			INVENT_LOG_ERROR("[Streaming] 传输队列提交失败!");
+			INVENT_LOG_ERROR("[IVulkanTexture2DManagement] [Streaming] 传输队列提交失败!");
 			vkFreeCommandBuffers(device, _transfer_command_pool, 1, &cmd);	// 提交失败, 非 pending, 安全
 			_abandon_pending_windows("传输队列提交失败");
 			return;
@@ -1030,13 +1030,13 @@ namespace INVENT
 		for (std::uint32_t p = 0; p < _upload_fences.size(); ++p)
 		{
 			if (!_wait_round_fence(p))
-				INVENT_LOG_ERROR(std::format("[Streaming] 排空传输轮次 {} 的 fence 失败!", p));
+				INVENT_LOG_ERROR(std::format("[IVulkanTexture2DManagement] [Streaming] 排空传输轮次 {} 的 fence 失败!", p));
 		}
 	}
 
 	void IVulkanTexture2DManagement::_abandon_pending_windows(const char* reason)
 	{
-		INVENT_LOG_ERROR(std::format("[Streaming] 放弃 {} 个在途上传窗口: {}.",
+		INVENT_LOG_ERROR(std::format("[IVulkanTexture2DManagement] [Streaming] 放弃 {} 个在途上传窗口: {}.",
 			_pending_windows.size(), reason));
 		// 先排空在途轮次: 已完成的窗口合法进入完成队列,
 		// 之后仍在 pending 的 image 才能安全销毁(GPU 不再引用)
@@ -1277,12 +1277,12 @@ namespace INVENT
 			}
 			catch (const std::exception& e)
 			{
-				INVENT_LOG_ERROR(std::format("[Streaming] 上传任务异常: {}", e.what()));
+				INVENT_LOG_ERROR(std::format("[IVulkanTexture2DManagement] [Streaming] 上传任务异常: {}", e.what()));
 				_abandon_pending_windows("任务异常");
 			}
 			catch (...)
 			{
-				INVENT_LOG_ERROR("[Streaming] 上传任务未知异常.");
+				INVENT_LOG_ERROR("[IVulkanTexture2DManagement] [Streaming] 上传任务未知异常.");
 				_abandon_pending_windows("任务未知异常");
 			}
 			// ---------- 排空在途轮次 (等待所有 fence + 冲刷完成项) ----------
@@ -2042,7 +2042,7 @@ namespace INVENT
 			case DXGI_FORMAT_BC7_UNORM:						return VK_FORMAT_BC7_UNORM_BLOCK;
 			case DXGI_FORMAT_BC7_UNORM_SRGB:				return VK_FORMAT_BC7_SRGB_BLOCK;
 			default:
-				INVENT_LOG_WARNING("This dds file type is not can analysis.");
+				INVENT_LOG_WARNING("[IVulkanTexture2DManagement] This dds file type is not can analysis.");
 				return VK_FORMAT_UNDEFINED;
 				break;
 			}
