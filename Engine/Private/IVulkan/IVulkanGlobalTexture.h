@@ -2,7 +2,6 @@
 
 #include "IBitArray.h"
 #include "ITextureCompresser.h"
-#include "IVulkan/ITieredImageMemoryManager.h"
 #include "IVulkan/VulkanConfig.h"
 
 #include <cstdint>
@@ -207,12 +206,15 @@ namespace INVENT
 			VkImage image{ VK_NULL_HANDLE };
 		};
 
-		// 上传专用 staging (上传任务私有; 批次开头才可能重建, 上一批 fence 已等待)
-		struct UploadStaging
+		struct PendingWindow
 		{
-			VkBuffer Buffer = VK_NULL_HANDLE;
-			void* Mapped = nullptr;
-			VkDeviceSize Size = 0;
+			std::uint32_t slot{ UINT32_MAX };
+			VkImage image{ VK_NULL_HANDLE };
+			VkFormat format{ VK_FORMAT_UNDEFINED };
+			std::uint32_t base{ 0 };		// 窗口基点(虚拟 mip 层号)
+			std::uint32_t total{ 0 };		// 虚拟总层数
+			std::uint32_t cursor{ 0 };		// 下一层待上传(虚拟 mip 层号)
+			bool started{ false };			// 是否已做首次布局转换
 		};
 
 		IVulkanTexture2DManagement() = default;
@@ -336,13 +338,16 @@ namespace INVENT
 		void _request_retarget(std::uint32_t slot, std::uint32_t target);
 		void _kick_upload_task();						// 投递上传任务到工作线程池
 		void _upload_task_func();						// 上传任务体 (线程池线程执行)
-		void _process_upload_batch(const std::vector<std::uint32_t>& slots);
 		VkCommandBuffer _begin_transfer_command();
-		void _submit_transfer_and_wait(VkCommandBuffer cmd);
-		bool _ensure_upload_staging(VkDeviceSize need);
 		void _record_release_barrier(VkCommandBuffer cmd, VkImage image);	// 传输队列 -> 图形队列 所有权释放
 		void _stop_upload();
 		void _evict_texture(std::uint32_t slot);
+		void _begin_pending_windows(const std::vector<std::uint32_t>& slots);
+		void _upload_round();
+		bool _wait_round_fence(std::uint32_t pool);
+		void _drain_all_round_fences();
+		void _abandon_pending_windows(const char* reason);
+
 		static std::uint32_t _get_default_texture_index(TextureType type);
 
 	private:
@@ -384,10 +389,14 @@ namespace INVENT
 
 		// ===== 传输资源 =====
 		VkCommandPool _transfer_command_pool = VK_NULL_HANDLE;
-		VkFence _upload_fence = VK_NULL_HANDLE;
 		std::uint32_t _transfer_family_index = UINT32_MAX;
 		std::uint32_t _graphics_family_index = UINT32_MAX;
-		UploadStaging _upload_staging;
+		std::vector<PendingWindow> _pending_windows;					// 仅上传任务访问
+		std::vector<VkFence> _upload_fences;							// 每轮一个, 环形
+		std::vector<bool> _upload_fence_used;							// 该 fence 是否在途
+		std::vector<VkCommandBuffer> _round_cmds;						// 每轮在途命令缓冲 (fence 信号后才能释放)
+		std::vector<std::vector<CompletedUpload>> _round_done;			// 每轮完成项, fence 信号后才冲刷
+		std::uint64_t _upload_round_index{ 0 };
 
 		// ===== GPU mip 反馈 (每帧独立的 device-local 缓冲 + host-visible 读回) =====
 		std::uint32_t _mip_feedback_count = 0;
@@ -409,7 +418,6 @@ namespace INVENT
 		std::uint32_t _demote_per_frame = 4;			// 每帧降级上限
 		std::uint32_t _upgrade_margin = 0;				// 升级预取层数 (0 = 精确按需)
 		std::uint32_t _evict_frame_threshold = 600;		// 连续未引用帧数 -> 驱逐 (60fps 约 10 秒)
-		VkDeviceSize _upload_batch_bytes_limit = 32ull * 1024 * 1024;	// 单批 staging 预算
 		bool _auto_initial_load = true;					// DDS 就绪后自动驻留最粗层 (约一个 BC 块)
 
 		bool _is_valid = false;

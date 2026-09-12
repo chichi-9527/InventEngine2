@@ -5,6 +5,7 @@
 #include "IMemPool/IMemPool.h"
 #include "IThread/IThreadPool.h"
 #include "IVulkan/VulkanBase.h"
+#include "IVulkan/ITieredImageMemoryManager2.h"
 #include "Memory/Memory.h"
 
 #include <dds_image/dds.hpp>
@@ -14,6 +15,8 @@
 #include <new>
 #include <cstring>
 #include <algorithm>
+
+namespace { using TexMemManager = INVENT::ITieredImageMemoryManager2; }
 
 namespace INVENT
 {
@@ -137,19 +140,28 @@ namespace INVENT
 
 		_init_other();
 		_init_default_image();
-		if (!ITieredImageMemoryManager::Init()) return false;
+		//if (!ITieredImageMemoryManager::Init()) return false;
+		if (!TexMemManager::Init()) return false;
 
 		// 流式资源
 		_init_transfer_resources();
 		_init_mip_feedback(static_cast<std::uint32_t>(textureCount));
 
-		_upload_pool = IEngineTools::Instance().GetWorkThreadPool();
+		_upload_pool = new IThreadPool();
 		if (_upload_pool == nullptr)
-			INVENT_LOG_ERROR("[IVulkanTexture2DManagement] 工作线程池不可用! 纹理流式加载被禁用.");
+		{
+			INVENT_LOG_ERROR("[IVulkanTexture2DManagement] 传输线程池不可用! 纹理流式加载被禁用.");
+			return false;
+		}
 		else if (_transfer_command_pool == VK_NULL_HANDLE)
+		{
 			INVENT_LOG_ERROR("[IVulkanTexture2DManagement] 无专用传输队列! 纹理流式加载被禁用.");
+			return false;
+		}
 		else
 			INVENT_LOG_INFO("[IVulkanTexture2DManagement] 纹理流式加载已启用.");
+
+		_upload_pool->Start();
 
 		_is_valid = true;
 		return true;
@@ -161,6 +173,12 @@ namespace INVENT
 
 		// 1) 先停上传任务 (可能正在创建 image / 读 DDS 数据)
 		_stop_upload();
+		if (_upload_pool)
+		{
+			_upload_pool->Shutdown();
+			delete _upload_pool;
+			_upload_pool = nullptr;
+		}
 
 		// 2) 槽位纹理 (流式窗口 image)
 		_bit_vector_used.FastForEachOne([this](size_t index) {
@@ -168,7 +186,9 @@ namespace INVENT
 			if (tex.ImageView != VK_NULL_HANDLE)
 				IVulkanBase::Base().DestroyImageView(tex.ImageView);
 			if (tex.Image != VK_NULL_HANDLE)
-				ITieredImageMemoryManager::DestroyVkImage(tex.Image);
+			{
+				TexMemManager::DestroyVkImage(tex.Image);
+			}
 			tex = IVulkanTexture2DHandle{};
 			});
 
@@ -176,11 +196,39 @@ namespace INVENT
 		{
 			std::lock_guard<std::mutex> lock(_completed_mutex);
 			for (auto& c : _completed_uploads)
+			{
 				if (c.image != VK_NULL_HANDLE)
-					ITieredImageMemoryManager::DestroyVkImage(c.image);
+				{
+					TexMemManager::DestroyVkImage(c.image);
+				}
+			}
+				
 			_completed_uploads.clear();
 		}
 		_pending_acquires.clear();
+
+		// 在途窗口 (stop 路径可能残留; _stop_upload 已排空 fence, 销毁安全)
+		for (auto& w : _pending_windows)
+		{
+			if (w.image != VK_NULL_HANDLE)
+			{
+				TexMemManager::DestroyVkImage(w.image);
+			}
+		}
+		_pending_windows.clear();
+		// 未冲刷完成项 (防御性, 正常路径 _round_done 已被排空)
+		for (auto& rd : _round_done)
+		{
+			for (auto& c : rd)
+			{
+				if (c.image != VK_NULL_HANDLE)
+				{
+					TexMemManager::DestroyVkImage(c.image);
+				}
+			}
+			rd.clear();
+		}
+		_upload_round_index = 0;
 
 		// 4) 帧延迟销毁环中待销毁资源
 		{
@@ -192,7 +240,9 @@ namespace INVENT
 					if (it.ImageView != VK_NULL_HANDLE)
 						IVulkanBase::Base().DestroyImageView(it.ImageView);
 					if (it.Image != VK_NULL_HANDLE)
-						ITieredImageMemoryManager::DestroyVkImage(it.Image);
+					{
+						TexMemManager::DestroyVkImage(it.Image);
+					}
 				}
 				ring.clear();
 			}
@@ -231,9 +281,7 @@ namespace INVENT
 		// 7) 流式资源
 		_destroy_mip_feedback();
 		_destroy_transfer_resources();
-		if (_upload_staging.Buffer != VK_NULL_HANDLE)
-			IVulkanBase::Base().UseVmaDestroyBuffer(_upload_staging.Buffer);
-		_upload_staging = UploadStaging{};
+		
 
 		// 8) 复位状态
 		_stream_states.reset();
@@ -490,7 +538,9 @@ namespace INVENT
 				if (it.ImageView != VK_NULL_HANDLE)
 					IVulkanBase::Base().DestroyImageView(it.ImageView);
 				if (it.Image != VK_NULL_HANDLE)
-					ITieredImageMemoryManager::DestroyVkImage(it.Image);
+				{
+					TexMemManager::DestroyVkImage(it.Image);
+				}
 			}
 			items.clear();
 		}
@@ -671,6 +721,337 @@ namespace INVENT
 		if (_resident_changed_callback)
 			_resident_changed_callback(Texture2DHandle{ slot },
 				UINT32_MAX, 0, s.TotalMips.load(std::memory_order_relaxed));
+	}
+
+	void IVulkanTexture2DManagement::_begin_pending_windows(const std::vector<std::uint32_t>& slots)
+	{
+		if (_upload_fences.empty()) return;
+		for (std::uint32_t slot : slots)
+		{
+			if (slot >= _stream_states_count) continue;
+			auto& s = _stream_states[slot];
+			if (s.Destroyed.load(std::memory_order_relaxed)) continue;
+			const std::uint32_t target = s.TargetBase.load(std::memory_order_acquire);
+			const std::uint32_t total = s.TotalMips.load(std::memory_order_acquire);
+			if (target == UINT32_MAX || total == 0) continue;
+			// 已有同槽在途窗口?
+			std::size_t wi = SIZE_MAX;
+			for (std::size_t i = 0; i < _pending_windows.size(); ++i)
+				if (_pending_windows[i].slot == slot) { wi = i; break; }
+			if (wi != SIZE_MAX)
+			{
+				auto& w = _pending_windows[wi];
+				if (target < w.base)
+				{
+					// 更精细的目标: 先排空在途轮次(旧窗口可能有已提交的拷贝), 再放弃重建
+					_drain_all_round_fences();
+					TexMemManager::DestroyVkImage(w.image);
+					_pending_windows.erase(_pending_windows.begin() + wi);
+				}
+				else
+				{
+					// 在途窗口已至少满足该目标: 清掉请求即可
+					std::uint32_t t = target;
+					s.TargetBase.compare_exchange_strong(t, UINT32_MAX, std::memory_order_acq_rel);
+					continue;
+				}
+			}
+			else
+			{
+				const std::uint32_t resident = s.ResidentBase.load(std::memory_order_relaxed);
+				if (resident != UINT32_MAX && resident <= target)
+				{
+					std::uint32_t t = target;
+					s.TargetBase.compare_exchange_strong(t, UINT32_MAX, std::memory_order_acq_rel);
+					continue;	// 已驻留足够精细
+				}
+			}
+			// 校验 DDS + 计算实际起点 start
+			VkFormat format = VK_FORMAT_UNDEFINED;
+			std::uint32_t start = target;
+			std::uint32_t width = 0, height = 0;
+			bool valid = false;
+			{
+				std::shared_lock<std::shared_mutex> lock(_textures_mutex);
+				const auto& td = _textures_data[slot];
+				if (td.Data && td.Data.data && td.Data.offsets &&
+					td.Data.mipLevels == total && td.Data.offsets->size() == total)
+				{
+					const auto& offsets = *td.Data.offsets;
+					const auto dataSize = static_cast<VkDeviceSize>(td.Data.data->size());
+					const VkDeviceSize stagingSize = TexMemManager::GetStagingBufferSize();
+					auto mipSize = [&](std::uint32_t m) -> VkDeviceSize {
+						return (m + 1 < total) ? (offsets[m + 1] - offsets[m])
+							: (dataSize - offsets[m]);
+						};
+					// 单层就超过整块 staging: 退到更粗的层开始 (超大纹理自然降级, 不重建缓冲)
+					while (start + 1 < total && mipSize(start) > stagingSize) ++start;
+					valid = (mipSize(start) <= stagingSize);
+					format = td.Format;
+					width = td.Data.width;
+					height = td.Data.height;
+				}
+			}
+			if (!valid)
+			{
+				INVENT_LOG_WARNING(std::format("[Streaming] slot {} 的 DDS 数据异常, 放弃本次上传.", slot));
+				std::uint32_t t = target;
+				s.TargetBase.compare_exchange_strong(t, UINT32_MAX);
+				continue;
+			}
+			// 创建窗口 image: 尺寸 = start 层尺寸, 层数 = total - start
+			TexMemManager::ICreateImageInfo info{};
+			info.ImageFormat = format;
+			info.ImageWidth = std::max(1u, width >> start);
+			info.ImageHeight = std::max(1u, height >> start);
+			info.MipLevels = total - start;
+			VkImage image = VK_NULL_HANDLE;
+			if (VkResult r = TexMemManager::CreateVkImage(image, info))
+			{
+				INVENT_LOG_WARNING(std::format("[Streaming] 创建窗口 VkImage 失败(显存预算?), slot {}, VkResult {}.",
+					slot, static_cast<std::int32_t>(r)));
+				std::uint32_t t = target;
+				s.TargetBase.compare_exchange_strong(t, UINT32_MAX);	// 下帧重试
+				continue;
+			}
+			_pending_windows.push_back({ slot, image, format, start, total, start, false });
+		}
+	}
+
+	void IVulkanTexture2DManagement::_upload_round()
+	{
+		if (_transfer_command_pool == VK_NULL_HANDLE || _transfer_queue == VK_NULL_HANDLE ||
+			_upload_fences.empty() || _pending_windows.empty())
+		{
+			if (!_pending_windows.empty())
+				_abandon_pending_windows("传输资源不可用");
+			return;
+		}
+
+		const std::uint32_t poolCount = static_cast<std::uint32_t>(_upload_fences.size());
+		const std::uint32_t pool = static_cast<std::uint32_t>(_upload_round_index % poolCount);
+
+		// 1) 等待 N 轮前使用同一块 staging 的传输完成 (顺带释放上一轮命令缓冲 + 冲刷完成项)
+		if (!_wait_round_fence(pool))
+		{
+			_abandon_pending_windows("fence 等待失败");
+			return;
+		}
+
+		// 2) offset 归零, 开启新一轮
+		TexMemManager::ResetStagingBuffer(pool);
+
+		VkCommandBuffer cmd = _begin_transfer_command();
+		if (cmd == VK_NULL_HANDLE)
+		{
+			_abandon_pending_windows("命令缓冲分配失败");
+			return;
+		}
+
+		std::vector<CompletedUpload> done;
+		bool anyRecorded = false;
+
+		for (std::size_t wi = 0; wi < _pending_windows.size(); )
+		{
+			auto& w = _pending_windows[wi];
+
+			// 槽位已销毁: 放弃该窗口
+			if (w.slot >= _stream_states_count ||
+				_stream_states[w.slot].Destroyed.load(std::memory_order_relaxed))
+			{
+				TexMemManager::DestroyVkImage(w.image);
+				w = _pending_windows.back();
+				_pending_windows.pop_back();
+				continue;
+			}
+
+			VkBuffer carveBuffer = VK_NULL_HANDLE;
+			VkDeviceSize carveOffset = 0;
+			std::uint32_t chunkEnd = 0;
+			std::vector<VkBufferImageCopy> regions;
+			bool ok = false;
+			{
+				std::shared_lock<std::shared_mutex> lock(_textures_mutex);
+				const auto& td = _textures_data[w.slot];
+				if (td.Data && td.Data.data && td.Data.offsets &&
+					td.Data.mipLevels == w.total && td.Data.offsets->size() == w.total)
+				{
+					const auto& offsets = *td.Data.offsets;
+					const auto dataSize = static_cast<VkDeviceSize>(td.Data.data->size());
+					const VkDeviceSize stagingSize = TexMemManager::GetStagingBufferSize();
+
+					// 本轮 chunk = [cursor, cursor+cnt), DDS 中的连续段
+					auto chunkBytes = [&](std::uint32_t cnt) -> VkDeviceSize {
+						const std::uint32_t end = w.cursor + cnt;
+						return (end < w.total) ? (offsets[end] - offsets[w.cursor])
+							: (dataSize - offsets[w.cursor]);
+						};
+					std::uint32_t cnt = 1;
+					while (w.cursor + cnt < w.total && chunkBytes(cnt + 1) <= stagingSize)
+						++cnt;
+
+					VkBuffer buf = VK_NULL_HANDLE;
+					VkDeviceSize off = 0;
+					void* dst = nullptr;
+					while (cnt > 0 && !TexMemManager::CreateStagingBuffer(buf, off, pool, chunkBytes(cnt), &dst))
+						--cnt;
+
+					if (cnt > 0)
+					{
+						std::memcpy(dst, td.Data.data->data() + offsets[w.cursor],
+							static_cast<size_t>(chunkBytes(cnt)));
+
+						regions.resize(cnt);
+						for (std::uint32_t i = 0; i < cnt; ++i)
+						{
+							const std::uint32_t vm = w.cursor + i;	// 虚拟 mip 层号
+							auto& r = regions[i];
+							r.bufferOffset = off + static_cast<VkDeviceSize>(offsets[vm] - offsets[w.cursor]);
+							r.bufferRowLength = 0;
+							r.bufferImageHeight = 0;
+							r.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, vm - w.base, 0, 1 };
+							r.imageOffset = { 0, 0, 0 };
+							r.imageExtent = { std::max(1u, td.Data.width >> vm), std::max(1u, td.Data.height >> vm), 1 };
+						}
+						carveBuffer = buf;
+						carveOffset = off;
+						chunkEnd = w.cursor + cnt;
+						ok = true;
+					}
+				}
+			}
+
+			if (!ok)
+			{
+				++wi;	// 本轮剩余空间装不下任何一层: 留给下一轮
+				continue;
+			}
+
+			if (!w.started)
+			{
+				_transition_image_layout(cmd, w.image, w.format,
+					VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					0, VK_REMAINING_MIP_LEVELS);
+				w.started = true;
+			}
+
+			vkCmdCopyBufferToImage(cmd, carveBuffer, w.image,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				static_cast<std::uint32_t>(regions.size()), regions.data());
+			anyRecorded = true;
+
+			if (chunkEnd >= w.total)
+			{
+				_record_release_barrier(cmd, w.image);
+				done.push_back({ w.slot, w.base, w.total, w.image });
+				w = _pending_windows.back();
+				_pending_windows.pop_back();
+			}
+			else
+			{
+				w.cursor = chunkEnd;
+				++wi;
+			}
+		}
+
+		auto device = IVulkanBase::Base().GetDevice();
+
+		if (!anyRecorded)
+		{
+			vkFreeCommandBuffers(device, _transfer_command_pool, 1, &cmd);	// 未提交过, 安全
+			if (!_pending_windows.empty())
+				_abandon_pending_windows("本轮未装入任何数据(防御性放弃)");
+			return;
+		}
+
+		// 提交前必须结束录制
+		if (VkResult r = vkEndCommandBuffer(cmd))
+		{
+			INVENT_LOG_ERROR(std::format("[Streaming] vkEndCommandBuffer 失败! VkResult: {}.", static_cast<std::int32_t>(r)));
+			vkFreeCommandBuffers(device, _transfer_command_pool, 1, &cmd);	// 非 pending, 安全
+			_abandon_pending_windows("vkEndCommandBuffer 失败");
+			return;
+		}
+
+		VkSubmitInfo si{};
+		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		si.commandBufferCount = 1;
+		si.pCommandBuffers = &cmd;
+
+		vkResetFences(device, 1, &_upload_fences[pool]);
+		if (vkQueueSubmit(_transfer_queue, 1, &si, _upload_fences[pool]) == VK_SUCCESS)
+		{
+			_upload_fence_used[pool] = true;
+			_round_cmds[pool] = cmd;	// pending 中不能立即释放 —— 挂到槽位, fence 信号后由 _wait_round_fence 释放
+			++_upload_round_index;
+		}
+		else
+		{
+			INVENT_LOG_ERROR("[Streaming] 传输队列提交失败!");
+			vkFreeCommandBuffers(device, _transfer_command_pool, 1, &cmd);	// 提交失败, 非 pending, 安全
+			_abandon_pending_windows("传输队列提交失败");
+			return;
+		}
+
+		// 完成项挂到本轮: fence 信号后才进入完成队列
+		for (auto& d : done)
+			_round_done[pool].push_back(d);
+	}
+
+	bool IVulkanTexture2DManagement::_wait_round_fence(std::uint32_t pool)
+	{
+		if (pool >= _upload_fences.size()) return false;
+		if (!_upload_fence_used[pool]) return true;	// 该槽位没有在途传输
+
+		auto device = IVulkanBase::Base().GetDevice();
+		if (vkWaitForFences(device, 1, &_upload_fences[pool], VK_TRUE, UINT64_MAX))
+			return false;
+
+		// fence 已信号 = release barrier 已执行 -> 冲刷完成项安全
+		{
+			std::lock_guard<std::mutex> lock(_completed_mutex);
+			for (auto& c : _round_done[pool])
+				_completed_uploads.push_back(c);
+		}
+		_round_done[pool].clear();
+		_upload_fence_used[pool] = false;
+
+		// fence 已信号 -> 本轮命令缓冲不再 pending, 现在释放才合法
+		if (pool < _round_cmds.size() && _round_cmds[pool] != VK_NULL_HANDLE)
+		{
+			vkFreeCommandBuffers(device, _transfer_command_pool, 1, &_round_cmds[pool]);
+			_round_cmds[pool] = VK_NULL_HANDLE;
+		}
+		return true;
+	}
+
+	void IVulkanTexture2DManagement::_drain_all_round_fences()
+	{
+		for (std::uint32_t p = 0; p < _upload_fences.size(); ++p)
+		{
+			if (!_wait_round_fence(p))
+				INVENT_LOG_ERROR(std::format("[Streaming] 排空传输轮次 {} 的 fence 失败!", p));
+		}
+	}
+
+	void IVulkanTexture2DManagement::_abandon_pending_windows(const char* reason)
+	{
+		INVENT_LOG_ERROR(std::format("[Streaming] 放弃 {} 个在途上传窗口: {}.",
+			_pending_windows.size(), reason));
+		// 先排空在途轮次: 已完成的窗口合法进入完成队列,
+		// 之后仍在 pending 的 image 才能安全销毁(GPU 不再引用)
+		_drain_all_round_fences();
+		for (auto& w : _pending_windows)
+		{
+			if (w.slot < _stream_states_count)
+			{
+				// 只清"仍指向本窗口"的目标; 期间被更精细目标覆盖的保留
+				std::uint32_t t = w.base;
+				_stream_states[w.slot].TargetBase.compare_exchange_strong(t, UINT32_MAX, std::memory_order_acq_rel);
+			}
+			TexMemManager::DestroyVkImage(w.image);
+		}
+		_pending_windows.clear();
 	}
 
 	std::uint32_t IVulkanTexture2DManagement::_get_default_texture_index(TextureType type)
@@ -855,7 +1236,7 @@ namespace INVENT
 
 	void IVulkanTexture2DManagement::_kick_upload_task()
 	{
-		if (_upload_pool == nullptr || _transfer_command_pool == VK_NULL_HANDLE) return;
+		if (_upload_pool == nullptr || _transfer_command_pool == VK_NULL_HANDLE || _upload_fences.empty()) return;
 
 		{
 			// 标志的设置与队列判空都在同一把锁内, 保证无漏唤醒
@@ -870,39 +1251,58 @@ namespace INVENT
 
 	void IVulkanTexture2DManagement::_upload_task_func()
 	{
-		try
+		for (;;)
 		{
-			while (!_upload_stop.load(std::memory_order_relaxed))
+			try
 			{
-				std::vector<std::uint32_t> slots;
+				while (!_upload_stop.load(std::memory_order_relaxed))
 				{
-					std::lock_guard<std::mutex> lock(_upload_mutex);
-					if (_upload_queue.empty())
+					std::vector<std::uint32_t> newSlots;
 					{
-						// 必须在同一锁内清标志, 否则存在"请求入队后无人投递"的窗口
-						_upload_task_running = false;
-						break;
+						std::lock_guard<std::mutex> lock(_upload_mutex);
+						if (!_upload_queue.empty())
+						{
+							newSlots.assign(_upload_queue.begin(), _upload_queue.end());
+							_upload_queue.clear();
+							_upload_queued_set.clear();
+						}
 					}
-					slots.assign(_upload_queue.begin(), _upload_queue.end());
-					_upload_queue.clear();
-					_upload_queued_set.clear();
+					if (!newSlots.empty())
+						_begin_pending_windows(newSlots);
+					if (!_pending_windows.empty())
+						_upload_round();			// 一轮 = 装满至多一块 staging 的传输
+					else if (newSlots.empty())
+						break;						// 队列与窗口都空
 				}
-				_process_upload_batch(slots);
 			}
-		}
-		catch (const std::exception& e)
-		{
-			INVENT_LOG_ERROR(std::format("[Streaming] 上传任务异常: {}", e.what()));
-		}
-		catch (...)
-		{
-			INVENT_LOG_ERROR("[Streaming] 上传任务未知异常.");
-		}
+			catch (const std::exception& e)
+			{
+				INVENT_LOG_ERROR(std::format("[Streaming] 上传任务异常: {}", e.what()));
+				_abandon_pending_windows("任务异常");
+			}
+			catch (...)
+			{
+				INVENT_LOG_ERROR("[Streaming] 上传任务未知异常.");
+				_abandon_pending_windows("任务未知异常");
+			}
+			// ---------- 排空在途轮次 (等待所有 fence + 冲刷完成项) ----------
+			_drain_all_round_fences();
+			// 锁内决定是否真正退出:
+			// "队列空 => 清 running" 与 "_kick 的检查" 在同一把锁下原子进行,
+			// 保证退出瞬间到达的新请求不可能被漏掉(要么被本任务看到, 要么 kick 到新任务)
 
-		// 兜底: stop / 异常路径也复位标志 (幂等)
-		std::lock_guard<std::mutex> lock(_upload_mutex);
-		_upload_task_running = false;
-		_upload_idle_cv.notify_all();
+			{
+				std::lock_guard<std::mutex> lock(_upload_mutex);
+				if (_upload_queue.empty() || _upload_stop.load(std::memory_order_relaxed))
+				{
+					_upload_task_running = false;
+					_upload_idle_cv.notify_all();
+					return;
+				}
+			}
+			// 排空期间又来了新请求: 回去继续干
+		}
+		
 	}
 
 	void IVulkanTexture2DManagement::_stop_upload()
@@ -942,193 +1342,6 @@ namespace INVENT
 	////////////// 批处理: 窗口 image 创建 + 尾巴上传 (传输队列)
 	//////////////////////////////////////////////////////////////////////////////////////
 
-	void IVulkanTexture2DManagement::_process_upload_batch(const std::vector<std::uint32_t>& slots)
-	{
-		if (_transfer_command_pool == VK_NULL_HANDLE || _transfer_queue == VK_NULL_HANDLE) return;
-
-		struct Work
-		{
-			std::uint32_t slot{ UINT32_MAX };
-			std::uint32_t new_base{ 0 };		// 目标窗口基点 (虚拟 mip 层号)
-			std::uint32_t total_mips{ 0 };		// 虚拟总层数
-			VkImage image{ VK_NULL_HANDLE };
-			VkFormat format{ VK_FORMAT_UNDEFINED };
-			VkDeviceSize staging_offset{ 0 };
-			VkDeviceSize tail_size{ 0 };		// [new_base, total) 连续数据段大小
-		};
-		std::vector<Work> works;
-		std::vector<std::uint32_t> leftovers;	// 超出 staging 预算, 留给下一批
-		VkDeviceSize total_need = 0;
-
-		// ---- Pass A: 校验 + 计算尺寸 + 创建窗口 image ----
-		for (std::uint32_t slot : slots)
-		{
-			if (slot >= _stream_states_count) continue;
-			auto& s = _stream_states[slot];
-			if (s.Destroyed.load(std::memory_order_relaxed)) continue;
-
-			const std::uint32_t target = s.TargetBase.load(std::memory_order_acquire);
-			const std::uint32_t total = s.TotalMips.load(std::memory_order_acquire);
-			if (target == UINT32_MAX || total == 0) continue;
-
-			const std::uint32_t resident = s.ResidentBase.load(std::memory_order_relaxed);
-			if (resident != UINT32_MAX && resident <= target)
-			{
-				// 已驻留更精细版本, 无需处理; 顺带清掉过期目标
-				std::uint32_t t = target;
-				s.TargetBase.compare_exchange_strong(t, UINT32_MAX, std::memory_order_acq_rel);
-				continue;
-			}
-
-			VkDeviceSize tail_size = 0;
-			VkFormat format = VK_FORMAT_UNDEFINED;
-			std::uint32_t w = 0, h = 0;
-			{
-				std::shared_lock<std::shared_mutex> lock(_textures_mutex);
-				const auto& td = _textures_data[slot];
-				if (!td.Data || !td.Data.offsets ||
-					td.Data.mipLevels != total ||
-					td.Data.offsets->size() < total ||
-					static_cast<size_t>((*td.Data.offsets)[target]) >= td.Data.data->size())
-				{
-					INVENT_LOG_WARNING(std::format("[Streaming] slot {} 的 DDS 数据异常, 跳过上传.", slot));
-					std::uint32_t t = target;
-					s.TargetBase.compare_exchange_strong(t, UINT32_MAX);
-					continue;
-				}
-				tail_size = static_cast<VkDeviceSize>(td.Data.data->size()) - (*td.Data.offsets)[target];
-				format = td.Format;
-				w = td.Data.width;
-				h = td.Data.height;
-			}
-
-			// staging 批量预算; 单个 work 始终放行 (防止大纹理饿死)
-			if (!works.empty() && total_need + tail_size > _upload_batch_bytes_limit)
-			{
-				leftovers.push_back(slot);
-				continue;
-			}
-
-			// 窗口 image: 尺寸 = 目标层尺寸, 层数 = 剩余全部层
-			// [new_base, total) 整条尾巴一起上传: 只比单层多 1/3 体积, 换来窗口内三线性过滤完整无接缝
-			ITieredImageMemoryManager::ICreateImageInfo info{};
-			info.ImageFormat = format;
-			info.ImageWidth = std::max(1u, w >> target);
-			info.ImageHeight = std::max(1u, h >> target);
-			info.MipLevels = total - target;
-			VkImage image = VK_NULL_HANDLE;
-			if (VkResult r = ITieredImageMemoryManager::CreateVkImage(image, info))
-			{
-				INVENT_LOG_WARNING(std::format("[Streaming] 创建窗口 VkImage 失败(显存预算?), slot {}, VkResult {}.",
-					slot, static_cast<std::int32_t>(r)));
-				std::uint32_t t = target;
-				s.TargetBase.compare_exchange_strong(t, UINT32_MAX);	// 允许下帧重试
-				continue;
-			}
-
-			Work wk{};
-			wk.slot = slot;
-			wk.new_base = target;
-			wk.total_mips = total;
-			wk.image = image;
-			wk.format = format;
-			wk.tail_size = tail_size;
-			wk.staging_offset = (total_need + 15) & ~VkDeviceSize{ 15 };	// 16B 对齐 (BC 块 8/16B)
-			total_need = wk.staging_offset + wk.tail_size;
-			works.push_back(wk);
-		}
-
-		// 超预算的放回队头 (本任务循环会继续处理)
-		if (!leftovers.empty())
-		{
-			std::lock_guard<std::mutex> lock(_upload_mutex);
-			for (auto it = leftovers.rbegin(); it != leftovers.rend(); ++it)
-			{
-				_upload_queue.push_front(*it);
-				_upload_queued_set.insert(*it);
-			}
-		}
-
-		if (works.empty()) return;
-
-		if (!_ensure_upload_staging(total_need))
-		{
-			for (auto& wk : works)
-			{
-				std::uint32_t t = wk.new_base;
-				_stream_states[wk.slot].TargetBase.compare_exchange_strong(t, UINT32_MAX);
-				ITieredImageMemoryManager::DestroyVkImage(wk.image);
-			}
-			return;
-		}
-
-		VkCommandBuffer cmd = _begin_transfer_command();
-		if (cmd == VK_NULL_HANDLE)
-		{
-			for (auto& wk : works)
-			{
-				std::uint32_t t = wk.new_base;
-				_stream_states[wk.slot].TargetBase.compare_exchange_strong(t, UINT32_MAX);
-				ITieredImageMemoryManager::DestroyVkImage(wk.image);
-			}
-			return;
-		}
-
-		// ---- Pass B: 拷贝数据 + 录制命令 ----
-		for (auto& wk : works)
-		{
-			std::vector<VkBufferImageCopy> regions;
-			{
-				std::shared_lock<std::shared_mutex> lock(_textures_mutex);
-				const auto& td = _textures_data[wk.slot];
-				const auto& offsets = *td.Data.offsets;
-
-				// cpu -> staging: DDS 中 [new_base, total) 是连续存放的
-				std::memcpy(static_cast<std::byte*>(_upload_staging.Mapped) + wk.staging_offset,
-					td.Data.data->data() + offsets[wk.new_base],
-					static_cast<size_t>(wk.tail_size));
-
-				// 每层一个 copy region: 窗口 image 的 level i <-> 虚拟 mip (new_base + i)
-				const std::uint32_t level_count = wk.total_mips - wk.new_base;
-				regions.resize(level_count);
-				for (std::uint32_t i = 0; i < level_count; ++i)
-				{
-					const std::uint32_t vm = wk.new_base + i;
-					auto& r = regions[i];
-					r.bufferOffset = wk.staging_offset + static_cast<VkDeviceSize>(offsets[vm] - offsets[wk.new_base]);
-					r.bufferRowLength = 0;		// 紧密排列
-					r.bufferImageHeight = 0;
-					r.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 };
-					r.imageOffset = { 0, 0, 0 };
-					r.imageExtent = { std::max(1u, td.Data.width >> vm), std::max(1u, td.Data.height >> vm), 1 };
-				}
-			}
-
-			// 1) UNDEFINED -> TRANSFER_DST (整张窗口 image)
-			_transition_image_layout(cmd, wk.image, wk.format,
-				VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				0, VK_REMAINING_MIP_LEVELS);
-
-			// 2) 逐层拷贝
-			vkCmdCopyBufferToImage(cmd, _upload_staging.Buffer, wk.image,
-				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				static_cast<std::uint32_t>(regions.size()), regions.data());
-
-			// 3) 所有权释放: transfer -> graphics (含布局转换到 SHADER_READ_ONLY)
-			_record_release_barrier(cmd, wk.image);
-		}
-
-		// 提交 + fence 等待 (只在池线程上等, 主渲染循环不受影响)
-		_submit_transfer_and_wait(cmd);
-
-		// ---- 完成队列 -> 主线程下帧 ProcessCompletedUploads 消费 ----
-		{
-			std::lock_guard<std::mutex> lock(_completed_mutex);
-			for (auto& wk : works)
-				_completed_uploads.push_back({ wk.slot, wk.new_base, wk.total_mips, wk.image });
-		}
-	}
-
 	VkCommandBuffer IVulkanTexture2DManagement::_begin_transfer_command()
 	{
 		VkCommandBufferAllocateInfo ai{};
@@ -1146,59 +1359,6 @@ namespace INVENT
 		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		vkBeginCommandBuffer(cmd, &bi);
 		return cmd;
-	}
-
-	void IVulkanTexture2DManagement::_submit_transfer_and_wait(VkCommandBuffer cmd)
-	{
-		vkEndCommandBuffer(cmd);
-
-		VkSubmitInfo si{};
-		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		si.commandBufferCount = 1;
-		si.pCommandBuffers = &cmd;
-
-		auto device = IVulkanBase::Base().GetDevice();
-		if (VkResult r = vkQueueSubmit(_transfer_queue, 1, &si, _upload_fence))
-		{
-			INVENT_LOG_ERROR(std::format("[Streaming] 传输队列提交失败! VkResult: {}.", static_cast<std::int32_t>(r)));
-		}
-		else if (VkResult r = vkWaitForFences(device, 1, &_upload_fence, VK_TRUE, UINT64_MAX))
-		{
-			INVENT_LOG_ERROR(std::format("[Streaming] 上传 fence 等待失败! VkResult: {}.", static_cast<std::int32_t>(r)));
-		}
-
-		vkResetFences(device, 1, &_upload_fence);
-		vkFreeCommandBuffers(device, _transfer_command_pool, 1, &cmd);
-		// fence 已等待: 本批 image 全部写完 (release barrier 已执行),
-		// staging 下一批可整体覆写
-	}
-
-	bool IVulkanTexture2DManagement::_ensure_upload_staging(VkDeviceSize need)
-	{
-		if (_upload_staging.Size >= need) return true;
-
-		// 只会在批次开头调用: 上一批已 fence 等待, 销毁重建安全
-		if (_upload_staging.Buffer != VK_NULL_HANDLE)
-		{
-			IVulkanBase::Base().UseVmaDestroyBuffer(_upload_staging.Buffer);
-			_upload_staging = UploadStaging{};
-		}
-
-		const VkDeviceSize newSize = std::max<VkDeviceSize>(need, IVulkan::DEF_STAGING_BUFFER_SIZE);
-		void* mapped = nullptr;
-		if (VkResult r = IVulkanBase::Base().UseVmaCreateBuffer(newSize,
-			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-			VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-			_upload_staging.Buffer, &mapped))
-		{
-			INVENT_LOG_ERROR(std::format("[Streaming] 上传 staging 扩容失败({} MB)! VkResult: {}.",
-				static_cast<std::uint64_t>(newSize / (1024 * 1024)), static_cast<std::int32_t>(r)));
-			_upload_staging.Buffer = VK_NULL_HANDLE;
-			return false;
-		}
-		_upload_staging.Mapped = mapped;
-		_upload_staging.Size = newSize;
-		return true;
 	}
 
 	void IVulkanTexture2DManagement::_record_release_barrier(VkCommandBuffer cmd, VkImage image)
@@ -1253,23 +1413,32 @@ namespace INVENT
 			return;
 		}
 
+		const std::uint32_t poolCount = TexMemManager::GetStagingPoolCount();
+		_upload_fences.assign(poolCount, VK_NULL_HANDLE);
+		_upload_fence_used.assign(poolCount, false);
+		_round_done.resize(poolCount);
+		_round_cmds.assign(poolCount, VK_NULL_HANDLE);		// ★ 新增
+
 		VkFenceCreateInfo fenceInfo{};
 		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-		if (vkCreateFence(base.GetDevice(), &fenceInfo, nullptr, &_upload_fence))
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;		// 初始已信号(未用过的槽位无需等待)
+		for (std::uint32_t i = 0; i < poolCount; ++i)
 		{
-			_upload_fence = VK_NULL_HANDLE;
-			INVENT_LOG_ERROR("[IVulkanTexture2DManagement] failed to create upload fence!");
+			if (vkCreateFence(base.GetDevice(), &fenceInfo, nullptr, &_upload_fences[i]))
+				INVENT_LOG_ERROR(std::format("[IVulkanTexture2DManagement] failed to create upload fence {}!", i));
 		}
 	}
 
 	void IVulkanTexture2DManagement::_destroy_transfer_resources()
 	{
 		auto device = IVulkanBase::Base().GetDevice();
-		if (_upload_fence != VK_NULL_HANDLE)
-		{
-			vkDestroyFence(device, _upload_fence, nullptr);
-			_upload_fence = VK_NULL_HANDLE;
-		}
+		for (auto& f : _upload_fences)
+			if (f != VK_NULL_HANDLE) vkDestroyFence(device, f, nullptr);
+		_upload_fences.clear();
+		_upload_fence_used.clear();
+		_round_cmds.clear();			// ★ Clear 前 _stop_upload 已排空全部 fence, 此时必为空
+		for (auto& rd : _round_done) rd.clear();
+		_round_done.clear();
 		if (_transfer_command_pool != VK_NULL_HANDLE)
 		{
 			vkDestroyCommandPool(device, _transfer_command_pool, nullptr);
