@@ -55,8 +55,8 @@ namespace INVENT
 		static bool CreateStagingBuffer(VkBuffer& out, VkDeviceSize& out_buffer_offset, std::uint32_t pool_index, VkDeviceSize buffer_size, void** out_mapped_data);
 		static void ResetStagingBuffer(std::uint32_t pool_index);
 		
-		static constexpr std::uint32_t GetStagingPoolCount() noexcept;
-		static constexpr VkDeviceSize GetStagingBufferSize() noexcept;
+		static std::uint32_t GetStagingPoolCount() noexcept;
+		static VkDeviceSize GetStagingBufferSize() noexcept;
 
 	private:
 		static bool _is_texture_budget_sufficient(std::uint32_t memory_type_index, VkDeviceSize required_size);

@@ -61,8 +61,9 @@ namespace INVENT
 		VmaAllocationCreateInfo imageAllocInfo{};
 		imageAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-#if 0
 		vmaFindMemoryTypeIndexForImageInfo(allocator, &imageCreateInfo, &imageAllocInfo, &_image_memory_type_index);
+
+#if 0
 		const VkPhysicalDeviceMemoryProperties* memProps;
 		vmaGetMemoryProperties(allocator, &memProps);
 		uint32_t heapIndex = memProps->memoryTypes[_image_memory_type_index].heapIndex;
@@ -275,12 +276,12 @@ namespace INVENT
 		stagingPools[pool_index].currentOffset = 0;
 	}
 
-	constexpr std::uint32_t ITieredImageMemoryManager::GetStagingPoolCount() noexcept
+	std::uint32_t ITieredImageMemoryManager::GetStagingPoolCount() noexcept
 	{
 		return IVulkan::UPLOAD_STAGING_COUNT;
 	}
 
-	constexpr VkDeviceSize ITieredImageMemoryManager::GetStagingBufferSize() noexcept
+	VkDeviceSize ITieredImageMemoryManager::GetStagingBufferSize() noexcept
 	{
 		return IVulkan::DEF_STAGING_BUFFER_SIZE;
 	}
