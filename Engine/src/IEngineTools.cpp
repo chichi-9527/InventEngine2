@@ -103,7 +103,7 @@ namespace INVENT
 
 	void IEngineTools::_init_threadpools()
 	{
-		_work_thread_pool = new IThreadPool(2, 1);
+		_work_thread_pool = new IThreadPool(1, 1);
 		_work_thread_pool->Start();
 		_allocator_thread_pool = new IThreadPool();
 		_allocator_thread_pool->Start();
