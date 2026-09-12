@@ -13,6 +13,7 @@
 
 namespace IVulkan
 {
+	constexpr std::uint32_t UPLOAD_STAGING_COUNT = 2U;
 	constexpr std::uint32_t MAX_FRAMES_IN_FLIGHT = 2U;
 	constexpr std::uint32_t MAX_BINDLESS_TEXTURES = 1U << 16;	// 最大纹理数量 65,536 (使用此最大值目的是纹理 ID 可以用 uint16 表示以降低显存占用)
 	constexpr std::uint32_t DEF_BINDLESS_TEXTURES = 10000U;		// 默认纹理数量 10,000
