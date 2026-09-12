@@ -153,6 +153,7 @@ namespace INVENT
 			VkImage& image,
 			void** out_mapped_data = nullptr);
 		void UseVmaDestroyImage(VkImage image);
+		bool UseVmaInvalidateAllocationBuffer(VkBuffer buffer);
 		bool UseVmaFlushAllocationBuffer(VkBuffer buffer);
 		bool UseVmaFlushAllocationImage(VkImage buffer);
 		VkImageView CreateImageView(VkImage image,
@@ -167,6 +168,7 @@ namespace INVENT
 		void UseVmaUnmapMemory(VkBuffer buffer);
 		VmaAllocator GetVmaAllocator() const;
 
+		QueueFamilyIndices GetQueueFamilyIndices() const { return _queue_family_indices; }
 		VkQueue GetTransferQueue() const { return _transfer_queue; }
 		VkFormat GetSwapChainImageFormat() const { return _swap_chain_image_format; }
 		VkFormat GetDepthFormat() const { return _depth_format; }

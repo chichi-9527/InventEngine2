@@ -1216,6 +1216,22 @@ namespace INVENT
 		MapImageAllocation->erase(reinterpret_cast<std::uint64_t>(image));
 	}
 
+	bool IVulkanBase::UseVmaInvalidateAllocationBuffer(VkBuffer buffer)
+	{
+		std::shared_lock<std::shared_mutex> lock(BufferCacheMutex);
+
+		auto iter = MapBufferAllocation->find(reinterpret_cast<std::uint64_t>(buffer));
+		if (iter != MapBufferAllocation->end())
+		{
+			if (VkResult result = vmaInvalidateAllocation(vmaAllocator, iter->second, 0, VK_WHOLE_SIZE))
+			{
+				INVENT_LOG_FATAL("[VulkanBase] Failed to invalidate buffer allocation! ");
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool IVulkanBase::UseVmaFlushAllocationBuffer(VkBuffer buffer)
 	{
 		std::shared_lock<std::shared_mutex> lock(BufferCacheMutex);
