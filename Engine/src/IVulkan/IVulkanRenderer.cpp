@@ -20,11 +20,19 @@ namespace INVENT
 		{
 			return false;
 		}*/
+		IVulkanTexture2DManagement::Instance().SetTextureResidentChangedCallback([](IVulkanTexture2DManagement::Texture2DHandle h,
+			std::uint32_t baseMip, std::uint32_t mipCount, std::uint32_t totalMips) {
+				// set material base mip
+			});
 		if (!IVulkanTexture2DManagement::Instance().Init() ||
 			!InstanceBuffer::Init())
 		{
 			return false;
 		}
+#if 0
+		IVulkanTexture2DManagement::Instance().AddTexture2D("text", "Config/EngineAssets/image/test.png.dds", IVulkanTexture2DManagement::TextureType::TYPE_Deffuse);
+#endif // 
+
 		return true;
 	}
 
