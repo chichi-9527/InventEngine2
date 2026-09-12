@@ -48,13 +48,15 @@ namespace INVENT
 
 		/// <param name="out">输出参数：返回 VkBuffer 句柄,一般情况下每帧内相同</param>
 		/// <param name="out_buffer_offset">输出参数：返回 VkBuffer 句柄中被分配的可用数据的偏移（VkDeviceSize）。</param>
-		/// <param name="frame_index">当前帧索引。</param>
+		/// <param name="pool_index"> staging 环形槽位编号 (0 ~ UPLOAD_STAGING_COUNT-1), 语义是"传输轮次" </param>
 		/// <param name="buffer_size">请求的缓冲区大小（以字节为单位）。内部自动 16 字节对齐</param>
 		/// <param name="out_mapped_data">映射到缓冲区内存的指针,此指针不是 VkBuffer 句柄的映射指针,而是偏移后的指针。</param>
 		/// <returns>返回布尔值：若成功分配缓冲区则返回 true，若可分配内存不足则返回 false。</returns>
-		static bool CreateStagingBuffer(VkBuffer& out, VkDeviceSize& out_buffer_offset, std::uint32_t frame_index, VkDeviceSize buffer_size, void** out_mapped_data);
-		static void ResetStagingBuffer(std::uint32_t frame_index);
+		static bool CreateStagingBuffer(VkBuffer& out, VkDeviceSize& out_buffer_offset, std::uint32_t pool_index, VkDeviceSize buffer_size, void** out_mapped_data);
+		static void ResetStagingBuffer(std::uint32_t pool_index);
 		
+		static constexpr std::uint32_t GetStagingPoolCount() noexcept;
+		static constexpr VkDeviceSize GetStagingBufferSize() noexcept;
 
 	private:
 		static bool _is_texture_budget_sufficient(std::uint32_t memory_type_index, VkDeviceSize required_size);

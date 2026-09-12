@@ -10,6 +10,7 @@
 
 namespace INVENT
 {
+	// 每传输"轮次"一块, 环形复用; 复用前由调用方等待该槽位 fence
 	struct StagingPool 
 	{
 		VkBuffer buffer = VK_NULL_HANDLE;
@@ -17,8 +18,8 @@ namespace INVENT
 		VkDeviceSize  currentOffset{ 0 };
 	};
 
-	static std::array<StagingPool, IVulkan::MAX_FRAMES_IN_FLIGHT> stagingPools{ nullptr };
-	static std::array<std::vector<VmaAllocation>, IVulkan::MAX_FRAMES_IN_FLIGHT> stagingAllocations;
+	static std::array<StagingPool, IVulkan::UPLOAD_STAGING_COUNT> stagingPools{ nullptr };
+
 	static VmaPool vkimagePool = nullptr;
 	static std::vector<VmaBudget> Budgets;
 
@@ -31,7 +32,7 @@ namespace INVENT
 
 		// stagingPools
 
-		for (std::uint32_t i = 0; i < IVulkan::MAX_FRAMES_IN_FLIGHT; ++i)
+		for (std::uint32_t i = 0; i < IVulkan::UPLOAD_STAGING_COUNT; ++i)
 		{
 			if (VkResult result = IVulkanBase::Base().UseVmaCreateBuffer(IVulkan::DEF_STAGING_BUFFER_SIZE,
 				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -246,11 +247,11 @@ namespace INVENT
 		IVulkanBase::Base().UseVmaDestroyImage(image);
 	}
 
-	bool ITieredImageMemoryManager::CreateStagingBuffer(VkBuffer& out, VkDeviceSize& out_buffer_offset, std::uint32_t frame_index, VkDeviceSize buffer_size, void** out_mapped_data)
+	bool ITieredImageMemoryManager::CreateStagingBuffer(VkBuffer& out, VkDeviceSize& out_buffer_offset, std::uint32_t pool_index, VkDeviceSize buffer_size, void** out_mapped_data)
 	{
-		if (frame_index >= IVulkan::MAX_FRAMES_IN_FLIGHT) return false;
+		if (pool_index >= IVulkan::UPLOAD_STAGING_COUNT) return false;
 		
-		auto& stagingPool = stagingPools[frame_index];
+		auto& stagingPool = stagingPools[pool_index];
 
 		VkDeviceSize alignedOffset = (stagingPool.currentOffset + 15) & ~(VkDeviceSize{ 15 });
 		if (alignedOffset + buffer_size > IVulkan::DEF_STAGING_BUFFER_SIZE)
@@ -267,12 +268,24 @@ namespace INVENT
 		return true;
 	}
 
-	void ITieredImageMemoryManager::ResetStagingBuffer(std::uint32_t frame_index)
+	void ITieredImageMemoryManager::ResetStagingBuffer(std::uint32_t pool_index)
 	{
-		if (frame_index >= IVulkan::MAX_FRAMES_IN_FLIGHT) return;
+		if (pool_index >= IVulkan::UPLOAD_STAGING_COUNT) return;
 
-		stagingPools[frame_index].currentOffset = 0;
+		stagingPools[pool_index].currentOffset = 0;
 	}
+
+	constexpr std::uint32_t ITieredImageMemoryManager::GetStagingPoolCount() noexcept
+	{
+		return IVulkan::UPLOAD_STAGING_COUNT;
+	}
+
+	constexpr VkDeviceSize ITieredImageMemoryManager::GetStagingBufferSize() noexcept
+	{
+		return IVulkan::DEF_STAGING_BUFFER_SIZE;
+	}
+
+
 
 	bool ITieredImageMemoryManager::_is_texture_budget_sufficient(std::uint32_t memory_type_index, VkDeviceSize required_size)
 	{
