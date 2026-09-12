@@ -22,6 +22,7 @@ namespace INVENT
 		}*/
 		IVulkanTexture2DManagement::Instance().SetTextureResidentChangedCallback([](IVulkanTexture2DManagement::Texture2DHandle h,
 			std::uint32_t baseMip, std::uint32_t mipCount, std::uint32_t totalMips) {
+				//INVENT_LOG_DEBUG(std::format("test callback debug, handle: {}, baseMip: {}, mipCount: {}, totalMips: {}.", h.slot, baseMip, mipCount, totalMips));
 				// set material base mip
 			});
 		if (!IVulkanTexture2DManagement::Instance().Init() ||
@@ -31,6 +32,8 @@ namespace INVENT
 		}
 #if 0
 		IVulkanTexture2DManagement::Instance().AddTexture2D("text", "Config/EngineAssets/image/test.png.dds", IVulkanTexture2DManagement::TextureType::TYPE_Deffuse);
+		while (1)
+			IVulkanTexture2DManagement::Instance().ProcessCompletedUploads();
 #endif // 
 
 		return true;
