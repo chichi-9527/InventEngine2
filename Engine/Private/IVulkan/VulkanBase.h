@@ -114,12 +114,14 @@ namespace INVENT
 		VkPipeline CreateGraphicsPipeline(const GraphicsPipelineConfig& config);
 		VkShaderModule CreateShaderMoudle(const std::string& path);
 		void DestroyShaderMoudle(VkShaderModule shader_moudle);
+		VkDeviceAddress GetBufferDeviceAddress(VkBuffer buffer);
 		void UpdateBindlessTextureSlot(uint32_t slot_id, VkImageView texture_image_view);
 		bool CreateSyncObjects(std::vector<VkFence>& frameFence,
 			std::vector<VkSemaphore>& acquireSemaphores,
 			std::vector<VkSemaphore>& submitSemaphores);
 		bool CreateCommandBuffers(std::vector<VkCommandBuffer>& buffers);
 		bool ResizeBindlessDescriptorPoolAndGobalSet();
+
 		VkCommandBuffer BeginSingleTimeCommands();
 		void EndSingleTimeCommands(VkCommandBuffer command_buffer);
 

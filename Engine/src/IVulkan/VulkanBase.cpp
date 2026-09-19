@@ -875,6 +875,15 @@ namespace INVENT
 			vkDestroyShaderModule(_device, shader_moudle, nullptr);
 	}
 
+	VkDeviceAddress IVulkanBase::GetBufferDeviceAddress(VkBuffer buffer)
+	{
+		VkBufferDeviceAddressInfo addressInfo{};
+		addressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+		addressInfo.buffer = buffer;
+
+		return vkGetBufferDeviceAddress(_device, &addressInfo);
+	}
+
 	void IVulkanBase::UpdateBindlessTextureSlot(uint32_t slot_id, VkImageView texture_image_view)
 	{
 		if (slot_id >= _current_descriptor_count ||
