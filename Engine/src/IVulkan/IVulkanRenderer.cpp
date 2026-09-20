@@ -4,6 +4,7 @@
 #include "IVulkan/VulkanBase.h"
 #include "IEngineTools.h"
 #include "IVulkan/IVulkanGlobalTexture.h"
+#include "IVulkan/IVulkanGlobalVertices.h"
 #include "IVulkan/IVulkanInstanceBuffer.h"
 #include "ILog.h"
 
@@ -26,6 +27,7 @@ namespace INVENT
 				// set material base mip
 			});
 		if (!IVulkanTexture2DManagement::Instance().Init() ||
+			!IVulkanGlobalVertices::Instance().Init() ||
 			!InstanceBuffer::Init())
 		{
 			return false;
