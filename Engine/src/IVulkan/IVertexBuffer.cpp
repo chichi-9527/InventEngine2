@@ -23,9 +23,12 @@ namespace INVENT
 		VmaAllocationCreateFlags vma_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
 			| VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
+		VkMemoryPropertyFlags mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
 		if (VkResult result = IVulkanBase::Base().UseVmaCreateBuffer(size,
 			usage,
 			vma_flags,
+			mem_flags,
 			_buffer,
 			&_mapped_data))
 		{
@@ -46,4 +49,56 @@ namespace INVENT
 		_mapped_data = nullptr;
 		_device_address = 0;
 	}
+
+	IVertexBuffer::Vhandle IVertexBuffer::AddVertices(const IVertex* vertices, std::uint32_t count)
+	{
+		if (vertices == nullptr || count == 0)
+			return INVALID_VHANDLE;
+		if (GetCanAllocateCount() < count)
+			return INVALID_VHANDLE;
+		const std::uint32_t offset = _offset;
+
+		std::memcpy(static_cast<std::byte*>(_mapped_data) + static_cast<std::size_t>(offset) * sizeof(IVertex),
+			vertices,
+			static_cast<std::size_t>(count) * sizeof(IVertex));
+
+		const Vhandle h = static_cast<Vhandle>(_datas.size());
+		auto& vData = _datas.emplace_back();
+		vData.Offset = offset;
+		vData.BaseAddress = _device_address + static_cast<VkDeviceSize>(offset) * sizeof(IVertex);
+		vData.Count = count;
+		_offset = offset + count;
+		_used_count += count;
+		_used_handles.insert(h);
+		return h;
+	}
+
+	void IVertexBuffer::DestoryVertices(Vhandle handle)
+	{
+		auto iter = _used_handles.find(handle);
+		if (iter == _used_handles.end()) return;
+
+		const auto& vData = _datas[handle];
+		_used_count -= vData.Count;
+		_used_handles.erase(iter);
+	}
+
+	void IVertexBuffer::Reset()
+	{
+		_datas.clear();
+		_used_handles.clear();
+		_used_count = 0;
+		_offset = 0;
+	}
+
+	bool IVertexBuffer::CheckDefragment() const
+	{
+		if (static_cast<double>(_used_count) / _vertex_count < 0.5 &&
+			static_cast<double>(_offset) / _vertex_count > 0.7)
+		{
+			return true;
+		}
+		return false;
+	}
+
 }
