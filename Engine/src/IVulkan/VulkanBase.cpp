@@ -434,7 +434,7 @@ namespace INVENT
 		vulkanFunctions.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
 
 		VmaAllocatorCreateInfo allocatorCreateInfo = {};
-		allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+		allocatorCreateInfo.flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT | VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 		allocatorCreateInfo.vulkanApiVersion = _api_version;
 		allocatorCreateInfo.physicalDevice = _physical_device;
 		allocatorCreateInfo.device = _device;
@@ -1122,6 +1122,16 @@ namespace INVENT
 		VkBuffer& buffer,
 		void** out_mapped_data)
 	{
+		return UseVmaCreateBuffer(size,
+			usage,
+			vma_flags,
+			0,
+			buffer,
+			out_mapped_data);
+	}
+
+	VkResult IVulkanBase::UseVmaCreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaAllocationCreateFlags vma_flags, VkMemoryPropertyFlags mem_flags, VkBuffer& buffer, void** out_mapped_data)
+	{
 		VkBufferCreateInfo bufferInfo{};
 		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		bufferInfo.size = size;
@@ -1131,7 +1141,8 @@ namespace INVENT
 		VmaAllocationCreateInfo vmaAllocCreateInfo{};
 		vmaAllocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
 		vmaAllocCreateInfo.flags = vma_flags;
-		
+		vmaAllocCreateInfo.requiredFlags = mem_flags;
+
 		VmaAllocation allocation;
 		VmaAllocationInfo vmaAllocInfo{};
 		if (VkResult result = vmaCreateBuffer(vmaAllocator, &bufferInfo, &vmaAllocCreateInfo, &buffer, &allocation, &vmaAllocInfo))

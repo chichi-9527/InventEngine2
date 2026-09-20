@@ -144,6 +144,12 @@ namespace INVENT
 			VmaAllocationCreateFlags vma_flags,
 			VkBuffer& buffer,
 			void** out_mapped_data = nullptr);
+		VkResult UseVmaCreateBuffer(VkDeviceSize size,
+			VkBufferUsageFlags usage,
+			VmaAllocationCreateFlags vma_flags,
+			VkMemoryPropertyFlags mem_flags,
+			VkBuffer& buffer,
+			void** out_mapped_data = nullptr);
 		void UseVmaDestroyBuffer(VkBuffer buffer);
 		VkResult UseVmaCreateImage(uint32_t width,
 			uint32_t height,
