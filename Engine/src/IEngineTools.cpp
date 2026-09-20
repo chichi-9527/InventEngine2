@@ -127,7 +127,11 @@ namespace INVENT
 
 	void IEngineTools::_init_mem_pools()
 	{
-		_gobal_memory_pool = IMemPool::CreatePool();
+		IMemPool::MemClassCounts counts{};
+		counts.BlockCountByte1024 = 1024;
+		counts.BlockCountByte2048 = 1024;
+		counts.BlockCountGeneral = 3;
+		_gobal_memory_pool = IMemPool::CreatePool(counts);
 	}
 
 	void IEngineTools::_clear_mem_pools()
