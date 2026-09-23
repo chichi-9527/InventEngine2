@@ -73,7 +73,7 @@ namespace INVENT
 		return h;
 	}
 
-	void IVertexBuffer::DestoryVertices(Vhandle handle)
+	void IVertexBuffer::DestroyVertices(Vhandle handle)
 	{
 		auto iter = _used_handles.find(handle);
 		if (iter == _used_handles.end()) return;

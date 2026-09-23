@@ -83,7 +83,7 @@ namespace INVENT
 
 		/// <returns> 失败返回 UNIT32_MAX </returns>
 		Vhandle AddVertices(const IVertex* vertices, std::uint32_t count);
-		void DestoryVertices(Vhandle handle);
+		void DestroyVertices(Vhandle handle);
 
 		void Reset();
 		bool CheckDefragment() const;
@@ -92,11 +92,11 @@ namespace INVENT
 		std::uint32_t GetUsedCount() const { return _used_count; }
 		std::uint32_t GetCanAllocateCount() const { return _vertex_count - _offset; }
 	private:
-		const std::vector<VerticesData>& _get_datas() const { return _datas; }
+		/*const std::vector<VerticesData>& _get_datas() const { return _datas; }
 		const std::unordered_set<Vhandle>& _get_used_handles() const { return _used_handles; }
 		VkDeviceAddress _get_device_address() const { return _device_address; }
 		VkBuffer _get_buffer() const { return _buffer; }
-		void* _get_mapped_data() const { return _mapped_data; }
+		void* _get_mapped_data() const { return _mapped_data; }*/
 
 	private:
 		VkBuffer _buffer = VK_NULL_HANDLE;
