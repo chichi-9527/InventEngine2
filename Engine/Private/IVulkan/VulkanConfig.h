@@ -30,6 +30,7 @@ namespace IVulkan
 	constexpr std::uint64_t DEF_IMAGE_POOL_BLOCK_SIZE = 64ull * 1024 * 1024; // 默认 vmaPool 块大小 64(MB)
 	constexpr std::uint32_t MAX_IMAGE_POOL_BLOCK_COUNT = 5; // 默认 vmaPool 块数最多 5(个)
 	constexpr std::uint32_t DEF_ONE_BUFFER_VERTEX_COUNT = 1ull * 1024 * 1024; // 默认 vertex buffer 顶点个数 1M(个)
+	constexpr std::uint32_t DEF_RESIDENT_BUFFER_VERTEX_COUNT = 4096; // 默认常驻顶点 buffer 顶点个数 4095(个)
 
 	inline VkDeviceSize TotalVRAM{ 0 };
 	// 计算出的各种 buffer 的总大小(B) ,总显存(TotalVRAM)的 70%
