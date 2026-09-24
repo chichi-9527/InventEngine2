@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 #include <unordered_set>
+#include <mutex>
 
 namespace INVENT
 {
@@ -73,11 +74,27 @@ namespace INVENT
 			std::uint32_t Offset{ 0 };
 		};
 
+		struct UploadContext
+		{
+			VkCommandPool CmdPool{ VK_NULL_HANDLE };		// graphics family, TRANSIENT
+			VkFence Fence{ VK_NULL_HANDLE };
+			VkQueue Queue{ VK_NULL_HANDLE };
+			bool IsValid() const
+			{
+				return CmdPool != VK_NULL_HANDLE &&
+					Fence != VK_NULL_HANDLE &&
+					Queue != VK_NULL_HANDLE;
+			}
+		};
+
 	public:
 		static constexpr std::uint32_t INVALID_VHANDLE = UINT32_MAX;
 		using Vhandle = std::uint32_t;
 
 	public:
+		static bool InitUploadContext();
+		static void DestroyUploadContext();
+
 		IVertexBuffer(std::uint32_t vertex_count = 0);
 		~IVertexBuffer();
 
@@ -98,9 +115,16 @@ namespace INVENT
 		VkBuffer _get_buffer() const { return _buffer; }
 		void* _get_mapped_data() const { return _mapped_data; }*/
 
+		static VkCommandBuffer _begin_one_time_cmd();
+		static bool _end_one_time_cmd(VkCommandBuffer cmd);			// 提交 + fence 等待
+		static void _record_visibility_barrier(VkCommandBuffer cmd, VkBuffer buffer);
+		Vhandle _commit_range(std::uint32_t count);
+
 	private:
+		inline static UploadContext _s_ctx{};
+		inline static std::mutex _s_mutex;
+
 		VkBuffer _buffer = VK_NULL_HANDLE;
-		void* _mapped_data = nullptr;
 		VkDeviceAddress _device_address{ 0 };
 
 		std::vector<VerticesData> _datas;
