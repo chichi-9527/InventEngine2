@@ -178,6 +178,7 @@ namespace INVENT
 
 		QueueFamilyIndices GetQueueFamilyIndices() const { return _queue_family_indices; }
 		VkQueue GetTransferQueue() const { return _transfer_queue; }
+		VkQueue GetGraphicsQueue() const { return _graphics_queue; }
 		VkFormat GetSwapChainImageFormat() const { return _swap_chain_image_format; }
 		VkFormat GetDepthFormat() const { return _depth_format; }
 		VkFormat GetShadowDepthFormat() const { return _shadow_depth_format; }
