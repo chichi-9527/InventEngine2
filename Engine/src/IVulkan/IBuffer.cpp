@@ -44,6 +44,28 @@ namespace INVENT
 		_s_ctx.Queue = VK_NULL_HANDLE;
 	}
 
+	void IBaseBuffer::RecordVisibilityBarrier(VkCommandBuffer cmd, VkBuffer buffer)
+	{
+		VkBufferMemoryBarrier2 barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+		barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+		barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+		// 消費: BDA 頂點拉取 (vertex/compute shader) + 傳統管線綁定 (vertex input)
+		barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT
+			| VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+			| VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+		barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.buffer = buffer;
+		barrier.size = VK_WHOLE_SIZE;
+		VkDependencyInfo di{};
+		di.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		di.bufferMemoryBarrierCount = 1;
+		di.pBufferMemoryBarriers = &barrier;
+		vkCmdPipelineBarrier2(cmd, &di);
+	}
+
 	VkCommandBuffer IBaseBuffer::_begin_one_time_cmd()
 	{
 		VkCommandBufferAllocateInfo ai{};
@@ -91,25 +113,4 @@ namespace INVENT
 		return false;
 	}
 
-	void IBaseBuffer::_record_visibility_barrier(VkCommandBuffer cmd, VkBuffer buffer)
-	{
-		VkBufferMemoryBarrier2 barrier{};
-		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-		barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-		barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-		// 消費: BDA 頂點拉取 (vertex/compute shader) + 傳統管線綁定 (vertex input)
-		barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT
-			| VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
-			| VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-		barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.buffer = buffer;
-		barrier.size = VK_WHOLE_SIZE;
-		VkDependencyInfo di{};
-		di.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		di.bufferMemoryBarrierCount = 1;
-		di.pBufferMemoryBarriers = &barrier;
-		vkCmdPipelineBarrier2(cmd, &di);
-	}
 }

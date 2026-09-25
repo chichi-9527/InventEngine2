@@ -36,10 +36,11 @@ namespace INVENT
 		static bool InitUploadContext();
 		static void DestroyUploadContext();
 
+		static void RecordVisibilityBarrier(VkCommandBuffer cmd, VkBuffer buffer);
+
 	protected:
 		static VkCommandBuffer _begin_one_time_cmd();
 		static bool _end_one_time_cmd(VkCommandBuffer cmd);			// 提交 + fence 等待
-		static void _record_visibility_barrier(VkCommandBuffer cmd, VkBuffer buffer);
 
 	protected:
 		inline static IVulkan::UploadContext _s_ctx{};
@@ -48,7 +49,7 @@ namespace INVENT
 	template<typename T>
 	class IBuffer : public IBaseBuffer
 	{
-		friend class IVulkanGlobalVertices;
+		friend class IVulkanGlobalVerticesIndices;
 
 		using pointType = T;
 
@@ -75,11 +76,11 @@ namespace INVENT
 		std::uint32_t GetUsedCount() const { return _used_count; }
 		std::uint32_t GetCanAllocateCount() const { return _vertex_count - _offset; }
 	private:
-		/*const std::vector<VerticesData>& _get_datas() const { return _datas; }
-		const std::unordered_set<Vhandle>& _get_used_handles() const { return _used_handles; }
+		const std::vector<PointTypeData>& _get_datas() const { return _datas; }
+		const std::unordered_set<Bhandle>& _get_used_handles() const { return _used_handles; }
 		VkDeviceAddress _get_device_address() const { return _device_address; }
 		VkBuffer _get_buffer() const { return _buffer; }
-		void* _get_mapped_data() const { return _mapped_data; }*/
+		Bhandle _add_datas_range(std::uint32_t count);
 
 		Bhandle _commit_range(std::uint32_t count);
 

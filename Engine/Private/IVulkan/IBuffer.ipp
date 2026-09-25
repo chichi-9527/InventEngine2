@@ -70,12 +70,13 @@ namespace INVENT
 	{
 		if (points == nullptr || count == 0)
 			return INVALID_VHANDLE;
+
+		std::lock_guard<std::mutex> lock(_s_mutex);
+
 		if (GetCanAllocateCount() < count)
 			return INVALID_VHANDLE;
 		const std::uint32_t offset = _offset;
 		const VkDeviceSize bytes = static_cast<VkDeviceSize>(count) * sizeof(pointType);
-
-		std::lock_guard<std::mutex> lock(_s_mutex);
 
 		VkBuffer staging = VK_NULL_HANDLE;
 		void* mapped = nullptr;
@@ -150,6 +151,16 @@ namespace INVENT
 		if (_vertex_count == 0) return false;
 		return static_cast<double>(_used_count) / _vertex_count < 0.5 &&
 			static_cast<double>(_offset) / _vertex_count > 0.7;
+	}
+
+	template<typename T>
+	inline IBaseBuffer::Bhandle IBuffer<T>::_add_datas_range(std::uint32_t count)
+	{
+		std::lock_guard<std::mutex> lock(_s_mutex);
+
+		if (count == 0 || GetCanAllocateCount() < count)
+			return INVALID_VHANDLE;
+		return _commit_range(count);
 	}
 
 	template<typename T>
