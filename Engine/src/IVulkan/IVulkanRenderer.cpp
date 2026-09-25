@@ -27,7 +27,7 @@ namespace INVENT
 				// set material base mip
 			});
 		if (!IVulkanTexture2DManagement::Instance().Init() ||
-			!IVulkanGlobalVertices::Instance().Init() ||
+			!IVulkanGlobalVerticesIndices::Instance().Init() ||
 			!InstanceBuffer::Init())
 		{
 			return false;
@@ -45,6 +45,7 @@ namespace INVENT
 	{
 		_clear();
 		InstanceBuffer::Destroy();
+		IVulkanGlobalVerticesIndices::Instance().Destroy();
 		IVulkanTexture2DManagement::Instance().Clear();
 		IVulkanTexture2DManagement::Instance().Terminate();
 	}
