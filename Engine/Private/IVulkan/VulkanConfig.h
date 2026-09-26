@@ -25,12 +25,14 @@ namespace IVulkan
 	constexpr std::uint32_t DEF_STAGING_BUFFER_SIZE = 32ull * 1024 * 1024; // 默认单个暂存缓冲区 VkBuffer 大小  32 (MB)
 	constexpr std::uint64_t CREATE_VKIMAGE_LIMIT = 1ull * 1024 * 1024; // 当创建小于 1(MB) 字节的 VkImage 时用 vmaPool,否则強制开启 Dedicated 独立分配
 	constexpr std::uint32_t MAX_DEDICATE_VKIMAGE_NUM = 2048u; // 当创建大于 1(MB) 字节的 VkImage 时开启 Dedicated 独立分配的最大个数 2048(个)
-	constexpr double MAX_TEXTURE_BUDGET_RATIO = 0.50; // "纹理"占可用显存最大比例 50%
+	constexpr double MAX_TEXTURE_BUDGET_RATIO = 0.40; // "纹理"占可用显存最大比例 40%
+	constexpr double MAX_VERTEX_INDEX_BUDGET_RATIO = 0.25; // "顶点&索引"占可用显存最大比例 25%
 	constexpr std::uint64_t ABSOLUTE_SAFETY_MARGIN = 64ull * 1024 * 1024; // 64(MB) 全域余量
 	constexpr std::uint64_t DEF_IMAGE_POOL_BLOCK_SIZE = 64ull * 1024 * 1024; // 默认 vmaPool 块大小 64(MB)
 	constexpr std::uint32_t MAX_IMAGE_POOL_BLOCK_COUNT = 5; // 默认 vmaPool 块数最多 5(个)
-	constexpr std::uint32_t DEF_ONE_BUFFER_VERTEX_COUNT = 1ull * 1024 * 1024; // 默认 vertex buffer 顶点个数 1M(个)
-	constexpr std::uint32_t DEF_RESIDENT_BUFFER_VERTEX_COUNT = 4096; // 默认常驻顶点 buffer 顶点个数 4095(个)
+	constexpr std::uint32_t DEF_ONE_BUFFER_VERTEX_COUNT = 1u * 1024 * 1024; // 默认 vertex buffer 顶点个数 1M(个)
+	constexpr std::uint32_t DEF_RESIDENT_VERTEX_BUFFER_COUNT = 2u * 1024; // 默认常驻顶点 buffer 顶点个数 2048(个)
+	constexpr std::uint32_t DEF_RESIDENT_INDEX_BUFFER_COUNT = 4u * 1024; // 默认常驻索引 buffer 顶点个数 4096(个)
 
 	inline VkDeviceSize TotalVRAM{ 0 };
 	// 计算出的各种 buffer 的总大小(B) ,总显存(TotalVRAM)的 70%
