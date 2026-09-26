@@ -63,6 +63,7 @@ namespace INVENT
 			_buffer = VK_NULL_HANDLE;
 		}
 		_device_address = 0;
+		// INVENT_LOG_DEBUG("IBuffer<T>::~IBuffer()");
 	}
 
 	template<typename T>
@@ -109,7 +110,7 @@ namespace INVENT
 		vkCmdCopyBuffer(cmd, staging, _buffer, 1, &copy);
 		// 末尾屏障: 拷貝寫入 -> 後續頂點讀取. 同隊列提交序使該依賴
 		// 覆蓋之後提交的所有幀 —— 渲染循環無需任何接入
-		_record_visibility_barrier(cmd, _buffer);
+		RecordVisibilityBarrier(cmd, _buffer);
 		if (!_end_one_time_cmd(cmd))
 		{
 			IVulkanBase::Base().UseVmaDestroyBuffer(staging);
