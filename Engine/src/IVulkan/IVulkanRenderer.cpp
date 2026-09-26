@@ -4,7 +4,7 @@
 #include "IVulkan/VulkanBase.h"
 #include "IEngineTools.h"
 #include "IVulkan/IVulkanGlobalTexture.h"
-#include "IVulkan/IVulkanGlobalVertices.h"
+#include "IVulkan/IVulkanGlobalVerticesIndices.h"
 #include "IVulkan/IVulkanInstanceBuffer.h"
 #include "ILog.h"
 
