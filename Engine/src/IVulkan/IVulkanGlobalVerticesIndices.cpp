@@ -49,57 +49,11 @@ namespace INVENT
 
 #if 0
 		INVENT_LOG_DEBUG("[IVulkanGlobalVertices] Init().");
+#endif
 
-		constexpr auto F3 = static_cast<VertexOptionalFlags>(HasUV | HasNormal);
-		auto pack_dir = [](const glm::vec3& d) -> glm::u16vec3
-			{
-				auto pack = [](float f) -> std::uint16_t
-					{
-						const int v = static_cast<int>((f * 0.5f + 0.5f) * 65535.0f);
-						return static_cast<std::uint16_t>(std::clamp(v, 0, 65535));
-					};
-				return { pack(d.x), pack(d.y), pack(d.z) };
-			};
+		if (!_init_def_meshes()) return false;
 
-		IVertex cube[24]{};
-		const glm::vec2 fuv[4] = { {0,0},{1,0},{1,1},{0,1} };
-		struct Face { glm::vec3 n; glm::vec3 p[4]; };
-		constexpr float P = 0.5f;
-		const Face faces[6] = {
-			{ { 0, 0, 1}, { { -P,-P, P }, {  P,-P, P }, {  P, P, P }, { -P, P, P } } },
-			{ { 0, 0,-1}, { {  P,-P,-P }, { -P,-P,-P }, { -P, P,-P }, {  P, P,-P } } },
-			{ { 1, 0, 0}, { {  P,-P, P }, {  P,-P,-P }, {  P, P,-P }, {  P, P, P } } },
-			{ {-1, 0, 0}, { { -P,-P,-P }, { -P,-P, P }, { -P, P, P }, { -P, P,-P } } },
-			{ { 0, 1, 0}, { { -P, P, P }, {  P, P, P }, {  P, P,-P }, { -P, P,-P } } },
-			{ { 0,-1, 0}, { { -P,-P,-P }, {  P,-P,-P }, {  P,-P, P }, { -P,-P, P } } },
-		};
-		std::uint32_t vi = 0;
-		for (const auto& f : faces)
-		{
-			const auto n = pack_dir(f.n);
-			for (int c = 0; c < 4; ++c)
-			{
-				cube[vi].position = f.p[c];
-				cube[vi].flags = F3;
-				cube[vi].uv = fuv[c];
-				cube[vi].normal = n;
-				++vi;
-			}
-		}
-		std::uint16_t idx[36];
-		for (int f = 0; f < 6; ++f)
-		{
-			const auto b = static_cast<std::uint16_t>(f * 4);
-			idx[f * 6 + 0] = b + 0; idx[f * 6 + 1] = b + 1; idx[f * 6 + 2] = b + 2;
-			idx[f * 6 + 3] = b + 0; idx[f * 6 + 4] = b + 2; idx[f * 6 + 5] = b + 3;
-		}
-
-		auto thandle = AddVertexIndexData("test", cube, 24, idx, 36);
-
-		INVENT_LOG_DEBUG(std::format("[GVI Test] test handle : {}.", thandle.recordIndex));
-
-#endif // 1
-
+		LogStatus();
 		return true;
 	}
 
@@ -125,6 +79,13 @@ namespace INVENT
 			delete _name_cache;
 			_name_cache = nullptr;
 		}
+		for (auto r : _records)
+		{
+			DeleteUseEngineAllocator(r);
+			_records.clear();
+		}
+		_def_meshes = {};
+		_shared_bytes = 0;
 		IBaseBuffer::DestroyUploadContext();
 	}
 
@@ -283,6 +244,186 @@ namespace INVENT
 		_name_cache->insert({ name, idx });
 
 		return _make_handle(idx);
+	}
+
+	void IVulkanGlobalVerticesIndices::ReleaseVertexIndexData(GVIHandle& handle)
+	{
+		if (!handle.IsValid()) return;
+
+		std::lock_guard<std::mutex> lock(_mutex);
+		const auto idx = handle.recordIndex;
+		handle = {};
+
+		if (idx >= _records.size() || _records[idx] == nullptr) return;
+
+		VertexIndexDataRecord* rec = _records[idx];
+		if (rec->share > 0) --rec->share;
+		if (rec->share > 0) return;		// 其他持有方仍在用
+
+		if (rec->vertexBuffer && rec->vertexHandle != IBaseBuffer::INVALID_VHANDLE)
+		{
+			rec->vertexBuffer->DestroyDatas(rec->vertexHandle);
+		}
+		if (rec->index16Buffer && rec->indexHandle != IBaseBuffer::INVALID_VHANDLE)
+		{
+			rec->index16Buffer->DestroyDatas(rec->indexHandle);
+		}
+		if (rec->index32Buffer && rec->indexHandle != IBaseBuffer::INVALID_VHANDLE)
+		{
+			rec->index32Buffer->DestroyDatas(rec->indexHandle);
+		}
+
+		if (!rec->name.empty()) _name_cache->erase(rec->name.c_str());
+		DeleteUseEngineAllocator(rec);
+		_records[idx] = nullptr;
+		_free_records.push_back(idx);
+	}
+
+	IVulkanGlobalVerticesIndices::GVIHandle IVulkanGlobalVerticesIndices::GetVertexIndexData(std::uint32_t record_index) const
+	{
+		std::lock_guard<std::mutex> lock(_mutex);
+		if (record_index >= _records.size() || _records[record_index] == nullptr) return {};
+		return _make_handle(record_index);
+	}
+
+	IVulkanGlobalVerticesIndices::GVIHandle IVulkanGlobalVerticesIndices::GetDefVertexIndexData(DefMeshVertHandle h) const
+	{
+		const auto idx = static_cast<std::size_t>(h);
+		const auto& m = _def_meshes[idx];
+		GVIHandle out{};
+		if (m.vertexHandle != IBaseBuffer::INVALID_VHANDLE)
+		{
+			const auto& d = _default_vertex_buffer->_get_datas()[m.vertexHandle];
+			out.vertexAddress = d.BaseAddress;
+		}
+		if (m.indexHandle != IBaseBuffer::INVALID_VHANDLE)
+		{
+			const auto& d = _default_index_buffer->_get_datas()[m.indexHandle];
+			out.indexAddress = d.BaseAddress;
+			out.indexCount = d.Count;
+		}
+
+		return out;
+	}
+
+	template<typename T>
+	bool anyVictim(const T& pool)
+	{
+		for (const auto* b : pool)
+			if (b->CheckDefragment()) return true;
+		return false;
+	}
+
+	std::shared_ptr<std::vector<IVulkanGlobalVerticesIndices::MovedData>> IVulkanGlobalVerticesIndices::Defragmanet()
+	{
+		auto moved = std::make_shared<std::vector<MovedData>>();
+
+		std::lock_guard<std::mutex> lock(_mutex);
+
+		if (!anyVictim(_vertex_buffers) && !anyVictim(_index_16_buffers) && !anyVictim(_index_32_buffers))
+			return moved;
+
+		std::vector<std::uint32_t> touched;
+		_defragment_family(_vertex_buffers, &VertexIndexDataRecord::vertexBuffer, &VertexIndexDataRecord::vertexHandle, touched);
+		_defragment_family(_index_16_buffers, &VertexIndexDataRecord::index16Buffer, &VertexIndexDataRecord::indexHandle, touched);
+		_defragment_family(_index_32_buffers, &VertexIndexDataRecord::index32Buffer, &VertexIndexDataRecord::indexHandle, touched);
+		if (touched.empty()) return moved;  // 全是洞的 Reset: 无地址变化, 无需通知
+		for (std::uint32_t idx : touched)
+		{
+			const auto h = _make_handle(idx);	// 地址从记录现取, 必为搬移后的最新值
+			moved->push_back({ idx, h.vertexAddress, h.indexAddress });
+		}
+		if (_address_changed_callback)
+			_address_changed_callback(moved);
+		return moved;
+	}
+
+	void IVulkanGlobalVerticesIndices::LogStatus() const
+	{
+		std::lock_guard<std::mutex> lock(_mutex);
+		auto log_pool = [](const char* tag, const auto& pool)
+			{
+				std::uint32_t i = 0;
+				for (const auto* b : pool)
+				{
+					const std::uint32_t tail = b->GetMaxVertexCount() - b->GetCanAllocateCount();
+					INVENT_LOG_INFO(std::format("[GVI] {} #{}: 容量 {}, 已分配 {}, 存活 {}, 碎片 {}.",
+						tag, i++, b->GetMaxVertexCount(), tail, b->GetUsedCount(), tail - b->GetUsedCount()));
+				}
+			};
+		const IBuffer<IVertex>* dv[] = { _default_vertex_buffer };
+		const IBuffer<std::uint16_t>* di[] = { _default_index_buffer };
+		log_pool("常驻顶点", dv);
+		log_pool("常驻索引", di);
+		log_pool("动态顶点", _vertex_buffers);
+		log_pool("动态索引16", _index_16_buffers);
+		log_pool("动态索引32", _index_32_buffers);
+	}
+
+	bool IVulkanGlobalVerticesIndices::_init_def_meshes()
+	{
+		constexpr auto F2 = static_cast<VertexOptionalFlags>(HasUV);
+		constexpr auto F3 = static_cast<VertexOptionalFlags>(HasUV | HasNormal);
+		auto pack_dir = [](const glm::vec3& d) -> glm::u16vec3
+			{
+				auto pack = [](float f) -> std::uint16_t
+					{
+						const int v = static_cast<int>((f * 0.5f + 0.5f) * 65535.0f);
+						return static_cast<std::uint16_t>(std::clamp(v, 0, 65535));
+					};
+				return { pack(d.x), pack(d.y), pack(d.z) };
+			};
+		// DefQuad: 中心对齐单位四边形 (uv 左上原点; 与精灵约定不符则自行翻转 v)
+		{
+			IVertex q[4]{};
+			const glm::vec3 pos[4] = { {-.5f,-.5f,0.f},{.5f,-.5f,0.f},{.5f,.5f,0.f},{-.5f,.5f,0.f} };
+			const glm::vec2 uvs[4] = { {0,0},{1,0},{1,1},{0,1} };
+			for (int i = 0; i < 4; ++i) { q[i].position = pos[i]; q[i].flags = F2; q[i].uv = uvs[i]; }
+			const std::uint16_t idx[6] = { 0,1,2, 0,2,3 };
+			auto& m = _def_meshes[static_cast<std::size_t>(DefMeshVertHandle::DefQuad)];
+			m.vertexHandle = _default_vertex_buffer->AddDatas(q, 4);
+			m.indexHandle = _default_index_buffer->AddDatas(idx, 6);
+		}
+		// DefCube: 6 面 x 4 顶点 + 36 索引 (绕序按外向 CCW 编写; 与剔除设置不符请调整)
+		{
+			IVertex cube[24]{};
+			const glm::vec2 fuv[4] = { {0,0},{1,0},{1,1},{0,1} };
+			struct Face { glm::vec3 n; glm::vec3 p[4]; };
+			constexpr float P = 0.5f;
+			const Face faces[6] = {
+				{ { 0, 0, 1}, { { -P,-P, P }, {  P,-P, P }, {  P, P, P }, { -P, P, P } } },
+				{ { 0, 0,-1}, { {  P,-P,-P }, { -P,-P,-P }, { -P, P,-P }, {  P, P,-P } } },
+				{ { 1, 0, 0}, { {  P,-P, P }, {  P,-P,-P }, {  P, P,-P }, {  P, P, P } } },
+				{ {-1, 0, 0}, { { -P,-P,-P }, { -P,-P, P }, { -P, P, P }, { -P, P,-P } } },
+				{ { 0, 1, 0}, { { -P, P, P }, {  P, P, P }, {  P, P,-P }, { -P, P,-P } } },
+				{ { 0,-1, 0}, { { -P,-P,-P }, {  P,-P,-P }, {  P,-P, P }, { -P,-P, P } } },
+			};
+			std::uint32_t vi = 0;
+			for (const auto& f : faces)
+			{
+				const auto n = pack_dir(f.n);
+				for (int c = 0; c < 4; ++c)
+				{
+					cube[vi].position = f.p[c];
+					cube[vi].flags = F3;
+					cube[vi].uv = fuv[c];
+					cube[vi].normal = n;
+					++vi;
+				}
+			}
+			std::uint16_t idx[36];
+			for (int f = 0; f < 6; ++f)
+			{
+				const auto b = static_cast<std::uint16_t>(f * 4);
+				idx[f * 6 + 0] = b + 0; idx[f * 6 + 1] = b + 1; idx[f * 6 + 2] = b + 2;
+				idx[f * 6 + 3] = b + 0; idx[f * 6 + 4] = b + 2; idx[f * 6 + 5] = b + 3;
+			}
+			auto& m = _def_meshes[static_cast<std::size_t>(DefMeshVertHandle::DefCube)];
+			m.vertexHandle = _default_vertex_buffer->AddDatas(cube, 24);
+			m.indexHandle = _default_index_buffer->AddDatas(idx, 36);
+		}
+
+		return true;
 	}
 
 	IVulkanGlobalVerticesIndices::GVIHandle IVulkanGlobalVerticesIndices::_make_handle(std::uint32_t record_index) const

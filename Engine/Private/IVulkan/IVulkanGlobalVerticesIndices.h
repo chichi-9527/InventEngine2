@@ -5,8 +5,10 @@
 
 #include <string>
 #include <vector>
+#include <array>
 #include <memory_resource>
 #include <functional>
+#include <memory>
 
 namespace INVENT
 {
@@ -83,6 +85,12 @@ namespace INVENT
 			std::uint32_t share{ 0 };
 		};
 
+		struct DefMeshData 
+		{
+			IBaseBuffer::Bhandle vertexHandle{ IBaseBuffer::INVALID_VHANDLE };
+			IBaseBuffer::Bhandle indexHandle{ IBaseBuffer::INVALID_VHANDLE };
+		};
+
 		using VertexIndexNameMap = std::unordered_map < std::string,
 			std::uint32_t,
 			std::hash<std::string>,
@@ -114,11 +122,11 @@ namespace INVENT
 
 		struct MovedData
 		{
-			IBaseBuffer::Bhandle handle{ IBaseBuffer::INVALID_VHANDLE };
-			VkDeviceAddress new_address{ 0 };
-			std::uint32_t count{ 0 };
+			std::uint32_t recordIndex{ INVALID_HANDLE };
+			VkDeviceAddress newVertexAddress{ 0 };
+			VkDeviceAddress newIndexAddress{ 0 };
 		};
-		using AddressChangedCallback = std::function<void(const std::vector<MovedData>&)>;
+		using AddressChangedCallback = std::function<void(const std::shared_ptr<std::vector<MovedData>>)>;
 
 	public:
 		static IVulkanGlobalVerticesIndices& Instance();
@@ -133,24 +141,35 @@ namespace INVENT
 		// 默认几何: recordIndex 恒 INVALID_HANDLE
 		GVIHandle GetDefVertexIndexData(DefMeshVertHandle h) const;
 
+		std::shared_ptr<std::vector<MovedData>> Defragmanet();
 
 		void SetVertexAddressChangedCallback(AddressChangedCallback callback)
 		{
 			_address_changed_callback = std::move(callback);
 		}
+		VkDeviceSize GetSharedBytes() const { return _shared_bytes; }
+		void LogStatus() const;
 	private:
+
+		bool _init_def_meshes();
 
 		GVIHandle _make_handle(std::uint32_t record_index) const;
 
 		bool _is_budget_ok(VkDeviceSize bytes) const;
 		std::uint32_t _acquire_record_slot();
 
+		template<typename B>
+		void _defragment_family(std::vector<B*>& family,
+			B* VertexIndexDataRecord::* buf_member,
+			IBaseBuffer::Bhandle VertexIndexDataRecord::* handle_member,
+			std::vector<std::uint32_t>& touched);
 	private:
 		IBuffer<IVertex>* _default_vertex_buffer = nullptr;
 		std::vector<IBuffer<IVertex>*> _vertex_buffers;
 		IBuffer<std::uint16_t>* _default_index_buffer = nullptr;
 		std::vector<IBuffer<std::uint16_t>*> _index_16_buffers;
 		std::vector<IBuffer<std::uint32_t>*> _index_32_buffers;
+		std::array<DefMeshData, static_cast<std::size_t>(DefMeshVertHandle::DefCount)> _def_meshes;
 
 		VkDeviceSize _shared_bytes{ 0 };
 
@@ -162,4 +181,104 @@ namespace INVENT
 		AddressChangedCallback  _address_changed_callback;
 		mutable std::mutex _mutex;
 	};
+
+	template<typename B>
+	inline void IVulkanGlobalVerticesIndices::_defragment_family(std::vector<B*>& family, B* VertexIndexDataRecord::* buf_member, IBaseBuffer::Bhandle VertexIndexDataRecord::* handle_member, std::vector<std::uint32_t>& touched)
+	{
+		for (B* victim : family)
+		{
+			if (!victim->CheckDefragment()) continue;
+			// 1) 收集 victim 内的存活记录
+			std::vector<std::uint32_t> recs;
+			for (std::uint32_t i = 0; i < _records.size(); ++i)
+				if (_records[i] != nullptr && (_records[i]->*buf_member) == victim)
+					recs.push_back(i);
+			if (recs.empty())
+			{
+				victim->Reset();	// 全是洞: 纯记账清空
+				continue;
+			}
+			// 2) 模拟装箱 (大->小, 排除 victim 自身) —— all-or-nothing, 装不下则零字节移动
+			auto seg_count = [&](std::uint32_t ri) -> std::uint32_t
+				{
+					auto* r = _records[ri];
+					return (r->*buf_member)->_get_datas()[r->*handle_member].Count;
+				};
+			std::sort(recs.begin(), recs.end(),
+				[&](std::uint32_t a, std::uint32_t b) { return seg_count(a) > seg_count(b); });
+			const auto victim_pos = static_cast<std::size_t>(
+				std::find(family.begin(), family.end(), victim) - family.begin());
+			std::vector<std::uint32_t> sim_free(family.size(), 0);
+			for (std::size_t i = 0; i < family.size(); ++i)
+				sim_free[i] = family[i]->GetCanAllocateCount();
+			struct Plan { std::uint32_t recIdx; std::size_t destPos; };
+			std::vector<Plan> plan;
+			bool ok = true;
+			for (std::uint32_t ri : recs)
+			{
+				const std::uint32_t count = seg_count(ri);
+				std::size_t dest = SIZE_MAX;
+				for (std::size_t i = 0; i < family.size(); ++i)
+				{
+					if (i == victim_pos) continue;	// 绝不能搬回 victim 自身
+					if (sim_free[i] >= count) { dest = i; sim_free[i] -= count; break; }
+				}
+				if (dest == SIZE_MAX) { ok = false; break; }
+				plan.push_back({ ri, dest });
+			}
+			if (!ok)
+			{
+				INVENT_LOG_TRACE("[GVI] 整理装箱失败, 该 buffer 本轮跳过.");
+				continue;
+			}
+			// 3) GPU 搬移: graphics 队列一次性命令缓冲
+			//    EndSingleTimeCommands 内部 vkQueueWaitIdle —— 返回时拷贝完成且飞行帧已排空,
+			//    victim Reset 后的空间复用因此安全
+			auto& base = IVulkanBase::Base();
+			VkCommandBuffer cmd = base.BeginSingleTimeCommands();
+			struct Commit { std::uint32_t recIdx; B* dest; IBaseBuffer::Bhandle newH; };
+			std::vector<Commit> commits;
+			std::vector<VkBuffer> written;
+			constexpr VkDeviceSize elem = sizeof(typename B::pointType);
+			for (const auto& p : plan)
+			{
+				auto* rec = _records[p.recIdx];
+				const auto& src = (rec->*buf_member)->_get_datas()[rec->*handle_member];
+				B* dest = family[p.destPos];
+				const auto newH = dest->_add_datas_range(src.Count);	// 只分配记账, 数据由下方拷贝填入
+				if (newH == IBaseBuffer::INVALID_VHANDLE) { ok = false; break; }	// 理论不可达(模拟已保证)
+				const auto& dst = dest->_get_datas()[newH];
+				VkBufferCopy copy{};
+				copy.srcOffset = static_cast<VkDeviceSize>(src.Offset) * elem;
+				copy.dstOffset = static_cast<VkDeviceSize>(dst.Offset) * elem;
+				copy.size = static_cast<VkDeviceSize>(src.Count) * elem;
+				vkCmdCopyBuffer(cmd, (rec->*buf_member)->_get_buffer(), dest->_get_buffer(), 1, &copy);
+				if (std::find(written.begin(), written.end(), dest->_get_buffer()) == written.end())
+					written.push_back(dest->_get_buffer());
+				commits.push_back({ p.recIdx, dest, newH });
+			}
+			if (ok)
+			{
+				for (VkBuffer b : written)
+					IBaseBuffer::RecordVisibilityBarrier(cmd, b);	// 拷贝写 -> 顶点/索引读取
+				base.EndSingleTimeCommands(cmd);	// 同步等待
+				// 4) 落账: 记录指向新位置 (recordIndex 不变, 只有地址变)
+				for (const auto& c : commits)
+				{
+					auto* rec = _records[c.recIdx];
+					rec->*buf_member = c.dest;
+					rec->*handle_member = c.newH;
+					if (std::find(touched.begin(), touched.end(), c.recIdx) == touched.end())
+						touched.push_back(c.recIdx);
+				}
+				victim->Reset();	// 旧段随 Reset 全部作废 (字节保留至复用 = 墓碑)
+				INVENT_LOG_INFO(std::format("[GVI] buffer 整理完成: 搬移 {} 份记录.", commits.size()));
+			}
+			else
+			{
+				// 部分已 AddDatasRange: 留下的是幽灵分配 (墓碑, 空间浪费但无数据损坏), 数据原样在 victim
+				base.EndSingleTimeCommands(cmd);
+			}
+		}
+	}
 }
