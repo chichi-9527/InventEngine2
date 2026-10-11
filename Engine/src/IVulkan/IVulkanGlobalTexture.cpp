@@ -6,9 +6,8 @@
 #include "IThread/IThreadPool.h"
 #include "IVulkan/VulkanBase.h"
 #include "IVulkan/ITieredImageMemoryManager2.h"
+#include "IVulkan/DDSFileFormat.h"
 #include "Memory/Memory.h"
-
-#include <dds_image/dds.hpp>
 
 #include <stdexcept>
 #include <filesystem>
@@ -21,95 +20,6 @@ namespace { using TexMemManager = INVENT::ITieredImageMemoryManager2; }
 namespace INVENT
 {
 	using Uint8Vector = std::vector<uint8_t, IMemPoolAllocatorOnlyFixedBlock<uint8_t>>;
-
-	std::uint32_t IVulkanTexture2DManagement::GetDXGIFormatFromTypes(TextureType tex_type, CompressionType& com_type)
-	{
-		switch (tex_type)
-		{
-		case TextureType::TYPE_Undefined:
-		case TextureType::TYPE_Deffuse:
-		case TextureType::TYPE_Emission:
-			if (com_type == CompressionType::BC1)
-				return DXGI_FORMAT_BC1_UNORM_SRGB;
-			if (com_type == CompressionType::BC3)
-				return DXGI_FORMAT_BC3_UNORM_SRGB;
-			if (com_type == CompressionType::BC6H)
-				return DXGI_FORMAT_BC6H_SF16;
-			if (com_type == CompressionType::BC7_RGB)
-				return DXGI_FORMAT_BC7_UNORM_SRGB;
-			if (com_type == CompressionType::BC7_RGBA)
-				return DXGI_FORMAT_BC7_UNORM;
-			//
-			INVENT_LOG_WARNING("deffuse/emission 不能使用 BC4/BC5,将使用默认压缩: BC1");
-			com_type = CompressionType::BC1;
-			return DXGI_FORMAT_BC1_UNORM_SRGB;
-			break;
-		case TextureType::TYPE_Normal:
-			if (com_type == CompressionType::BC5)
-				return DXGI_FORMAT_BC5_UNORM;
-			//
-			INVENT_LOG_WARNING("normal 不能使用 BC1/BC3/BC4/BC6H/BC7,将使用默认压缩: BC5");
-			com_type = CompressionType::BC5;
-			return DXGI_FORMAT_BC5_UNORM;
-			break;
-		case TextureType::TYPE_Roughness:
-		case TextureType::TYPE_AO:
-		case TextureType::TYPE_Opacity:
-		case TextureType::TYPE_Metallic:
-			if (com_type == CompressionType::BC4)
-				return DXGI_FORMAT_BC4_UNORM;
-			//
-			INVENT_LOG_WARNING("roughness/ao/opacity/matallic 不能使用 BC1/BC3/BC5/BC6H/BC7,将使用默认压缩: BC4");
-			com_type = CompressionType::BC4;
-			return DXGI_FORMAT_BC4_UNORM;
-			break;
-		case TextureType::TYPE_ORM:
-			if (com_type == CompressionType::BC7_RGB)
-				return DXGI_FORMAT_BC7_UNORM_SRGB;
-			if (com_type == CompressionType::BC7_RGBA)
-				return DXGI_FORMAT_BC7_UNORM;
-			if (com_type == CompressionType::BC3)
-				return DXGI_FORMAT_BC3_UNORM_SRGB;
-			//
-			INVENT_LOG_WARNING("orm 不能使用 BC1/BC4/BC5/BC6H,将使用默认压缩: BC7");
-			com_type = CompressionType::BC7_RGB;
-			return DXGI_FORMAT_BC7_UNORM_SRGB;
-			break;
-		case TextureType::TYPE_Specular:
-			if (com_type == CompressionType::BC4)
-				return DXGI_FORMAT_BC4_UNORM;
-			if (com_type == CompressionType::BC6H)
-				return DXGI_FORMAT_BC6H_SF16;
-			if (com_type == CompressionType::BC7_RGB)
-				return DXGI_FORMAT_BC7_UNORM_SRGB;
-			if (com_type == CompressionType::BC7_RGBA)
-				return DXGI_FORMAT_BC7_UNORM;
-			//
-			INVENT_LOG_WARNING("specular 不能使用 BC1/BC3/BC5,将使用默认压缩: BC4");
-			com_type = CompressionType::BC4;
-			return DXGI_FORMAT_BC4_UNORM;
-			break;
-		case TextureType::TYPE_ClearCoat:
-			if (com_type == CompressionType::BC5)
-				return DXGI_FORMAT_BC5_UNORM;
-			if (com_type == CompressionType::BC6H)
-				return DXGI_FORMAT_BC6H_SF16;
-			if (com_type == CompressionType::BC7_RGB)
-				return DXGI_FORMAT_BC7_UNORM_SRGB;
-			if (com_type == CompressionType::BC7_RGBA)
-				return DXGI_FORMAT_BC7_UNORM;
-			//
-			INVENT_LOG_WARNING("clear coat 不能使用 BC1/BC3/BC4,将使用默认压缩: BC5");
-			com_type = CompressionType::BC5;
-			return DXGI_FORMAT_BC5_UNORM;
-			break;
-		default:
-			return DXGI_FORMAT_UNKNOWN;
-			break;
-		}
-		INVENT_LOG_WARNING("压缩格式不能作用于图片类型;例如 deffuse 不能使用 BC4/BC5.(例如不代表本次错误)");
-		return DXGI_FORMAT_UNKNOWN;
-	}
 
 	IVulkanTexture2DManagement& IVulkanTexture2DManagement::Instance()
 	{
@@ -1990,80 +1900,111 @@ namespace INVENT
 		ITextureCompresser::CompressedTextureData& out,
 		VkFormat& format)
 	{
-		dds::Image image;
-		auto result = dds::readFile(filepath, &image);
-		if (result != dds::ReadResult::Success)
+		if (!out) return false;
+		// ---------- 1. 整文件读入 ----------
+		std::vector<char> file;
+		if (!IEngineTools::ReadFile(filepath, file))
+			return false;
+		if (file.size() < ITools::DDS_HEADER_BYTES)
 		{
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] dds 文件太小, 路径: {}", filepath));
 			return false;
 		}
-
-		if (!out) return false;
+		// ---------- 2. 头解析 (memcpy 避免对齐问题) ----------
+		ITools::DDS_Header hdr{};
+		std::memcpy(&hdr, file.data(), sizeof(hdr));
+		if (hdr.dwMagic != ITools::DDS_MAGIC || hdr.dwSize != 124)
+		{
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] 不是合法的 DDS 文件, 路径: {}", filepath));
+			return false;
+		}
+		if (hdr.pfFourCC != ITools::DDS_FOURCC_DX10)
+		{
+			// 本管线只支持 DX10 扩展头 (texconv -dx10 / 自家压缩器产出)
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] 不支持非 DX10 扩展头的 dds, 路径: {}", filepath));
+			return false;
+		}
+		ITools::DDS_Header_DX10 dx10{};
+		std::memcpy(&dx10, file.data() + sizeof(ITools::DDS_Header), sizeof(dx10));
+		if (dx10.resourceDimension != 3 || dx10.arraySize != 1)		// 仅单层 2D
+			return false;
+		// ---------- 3. 格式校验 + 映射 (语义与旧版一致) ----------
+		const std::uint32_t dxgi = dx10.dxgiFormat;
 		switch (type)
 		{
-		case INVENT::IVulkanTexture2DManagement::LoadDDSType::Auto:
-			break;
-		case INVENT::IVulkanTexture2DManagement::LoadDDSType::BC1:
-			if (image.format != DXGI_FORMAT_BC1_UNORM_SRGB && image.format != DXGI_FORMAT_BC1_UNORM) return false;
-			break;
-		case INVENT::IVulkanTexture2DManagement::LoadDDSType::BC3:
-			if (image.format != DXGI_FORMAT_BC3_UNORM_SRGB && image.format != DXGI_FORMAT_BC3_UNORM) return false;
-			break;
-		case INVENT::IVulkanTexture2DManagement::LoadDDSType::BC4:
-			if (image.format != DXGI_FORMAT_BC4_SNORM && image.format != DXGI_FORMAT_BC4_UNORM) return false;
-			break;
-		case INVENT::IVulkanTexture2DManagement::LoadDDSType::BC5:
-			if (image.format != DXGI_FORMAT_BC5_SNORM && image.format != DXGI_FORMAT_BC5_UNORM) return false;
-			break;
-		case INVENT::IVulkanTexture2DManagement::LoadDDSType::BC6H:
-			if (image.format != DXGI_FORMAT_BC6H_UF16 && image.format != DXGI_FORMAT_BC6H_SF16) return false;
-			break;
-		case INVENT::IVulkanTexture2DManagement::LoadDDSType::BC7:
-			if (image.format != DXGI_FORMAT_BC7_UNORM_SRGB && image.format != DXGI_FORMAT_BC7_UNORM) return false;
-			break;
-		default:
+		case LoadDDSType::Auto: break;
+		case LoadDDSType::BC1: if (dxgi != ITools::DXGI_BC::BC1_UNORM && dxgi != ITools::DXGI_BC::BC1_UNORM_SRGB) return false; break;
+		case LoadDDSType::BC3: if (dxgi != ITools::DXGI_BC::BC3_UNORM && dxgi != ITools::DXGI_BC::BC3_UNORM_SRGB) return false; break;
+		case LoadDDSType::BC4: if (dxgi != ITools::DXGI_BC::BC4_UNORM && dxgi != ITools::DXGI_BC::BC4_SNORM) return false; break;
+		case LoadDDSType::BC5: if (dxgi != ITools::DXGI_BC::BC5_UNORM && dxgi != ITools::DXGI_BC::BC5_SNORM) return false; break;
+		case LoadDDSType::BC6H: if (dxgi != ITools::DXGI_BC::BC6H_UF16 && dxgi != ITools::DXGI_BC::BC6H_SF16) return false; break;
+		case LoadDDSType::BC7: if (dxgi != ITools::DXGI_BC::BC7_UNORM && dxgi != ITools::DXGI_BC::BC7_UNORM_SRGB) return false; break;
+		default: return false;
+		}
+		format = ITools::DxgiToVkFormat(dxgi);
+		const std::uint32_t blockBytes = ITools::DxgiBlockBytes(dxgi);
+		if (format == VK_FORMAT_UNDEFINED || blockBytes == 0)
+		{
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] 不支持的 dxgi 格式: {}, 路径: {}", dxgi, filepath));
 			return false;
 		}
-
-		if (image.arraySize != 1) return false;
-
-		auto getTypeFromformat = [](DXGI_FORMAT format)-> VkFormat {
-			switch (format)
-			{
-			case DXGI_FORMAT_BC1_UNORM:						return VK_FORMAT_BC1_RGB_UNORM_BLOCK;
-			case DXGI_FORMAT_BC1_UNORM_SRGB:				return VK_FORMAT_BC1_RGB_SRGB_BLOCK;
-			case DXGI_FORMAT_BC3_UNORM:						return VK_FORMAT_BC3_UNORM_BLOCK;
-			case DXGI_FORMAT_BC3_UNORM_SRGB:				return VK_FORMAT_BC3_SRGB_BLOCK;
-			case DXGI_FORMAT_BC4_UNORM:						return VK_FORMAT_BC4_UNORM_BLOCK;
-			case DXGI_FORMAT_BC4_SNORM:						return VK_FORMAT_BC4_SNORM_BLOCK;
-			case DXGI_FORMAT_BC5_UNORM:						return VK_FORMAT_BC5_UNORM_BLOCK;
-			case DXGI_FORMAT_BC5_SNORM:						return VK_FORMAT_BC5_SNORM_BLOCK;
-			case DXGI_FORMAT_BC6H_UF16:						return VK_FORMAT_BC6H_UFLOAT_BLOCK;
-			case DXGI_FORMAT_BC6H_SF16:						return VK_FORMAT_BC6H_SFLOAT_BLOCK;
-			case DXGI_FORMAT_BC7_UNORM:						return VK_FORMAT_BC7_UNORM_BLOCK;
-			case DXGI_FORMAT_BC7_UNORM_SRGB:				return VK_FORMAT_BC7_SRGB_BLOCK;
-			default:
-				INVENT_LOG_WARNING("[IVulkanTexture2DManagement] This dds file type is not can analysis.");
-				return VK_FORMAT_UNDEFINED;
-				break;
-			}
-			};
-
-		format = getTypeFromformat(image.format);
-		if (format == VK_FORMAT_UNDEFINED) return false;
-
-		out.width = image.width;
-		out.height = image.height;
-		out.mipLevels = image.numMips;
-		out.offsets->resize(image.mipmaps.size());
-		size_t dataSize = 0;
-		for (size_t i = 0; i < image.mipmaps.size(); ++i)
+		// ---------- 4. mip 数量: 头值 -> 合法上限 clamp ----------
+		out.width = hdr.dwWidth;
+		out.height = hdr.dwHeight;
+		if (out.width == 0 || out.height == 0) return false;
+		std::uint32_t maxMips = 1;		// floor(log2(max(w,h))) + 1
 		{
-			(*out.offsets)[i] = static_cast<uint32_t>(dataSize);
-			dataSize += image.mipmaps[i].size();
+			std::uint32_t mw = out.width, mh = out.height;
+			while (mw > 1 || mh > 1) { mw >>= 1; mh >>= 1; ++maxMips; }
 		}
-		out.data->resize(dataSize);
-		memcpy(out.data->data(), image.data.get(), dataSize);
-
+		std::uint32_t mipCount = hdr.dwMipMapCount ? hdr.dwMipMapCount : 1;
+		mipCount = std::min(mipCount, maxMips);
+		// ---------- 5. 每层字节数 (块对齐算术, 这是全部的"语义") ----------
+		auto mipBytes = [&](std::uint32_t m) -> std::uint32_t {
+			const std::uint32_t w = std::max(1u, out.width >> m);
+			const std::uint32_t h = std::max(1u, out.height >> m);
+			return ((w + 3) / 4) * ((h + 3) / 4) * blockBytes;
+			};
+		std::vector<std::uint32_t> sizes(mipCount);
+		std::uint32_t totalBytes = 0;
+		for (std::uint32_t m = 0; m < mipCount; ++m)
+		{
+			sizes[m] = mipBytes(m);
+			totalBytes += sizes[m];
+		}
+		// ---------- 6. 文件数据量防御: 装不下则从尾部丢弃最粗层 ----------
+		const std::uint32_t avail = static_cast<std::uint32_t>(file.size() - ITools::DDS_HEADER_BYTES);
+		while (totalBytes > avail && mipCount > 1)
+		{
+			totalBytes -= sizes[mipCount - 1];
+			--mipCount;
+		}
+		if (totalBytes > avail)
+		{
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] dds 数据损坏(连 mip0 都不完整), 路径: {}", filepath));
+			return false;
+		}
+		if (mipCount != hdr.dwMipMapCount)
+			INVENT_LOG_WARNING(std::format("[IVulkanTexture2DManagement] dds mip 层数被截断: {} -> {}, 路径: {}",
+				hdr.dwMipMapCount, mipCount, filepath));
+		// ---------- 7. 填充: offsets + 数据 (mip0 紧跟 148B 头, 从大到小顺序排列) ----------
+		out.mipLevels = mipCount;
+		out.offsets->resize(mipCount);
+		{
+			std::uint32_t acc = 0;
+			for (std::uint32_t m = 0; m < mipCount; ++m)
+			{
+				(*out.offsets)[m] = acc;
+				acc += sizes[m];
+			}
+		}
+		out.data->resize(totalBytes);
+		std::memcpy(out.data->data(),
+			file.data() + ITools::DDS_HEADER_BYTES,		// mip0 = 文件偏移 148, 这是 DDS 的物理布局
+			totalBytes);
+		// ---------- 8. 自检日志: 总字节数可对照公式验证 ----------
+		INVENT_LOG_INFO(std::format("[IVulkanTexture2DManagement] [DDS] {}x{} mips:{} dxgi:{} bytes:{} (block:{}) path:{}",
+			out.width, out.height, out.mipLevels, dxgi, totalBytes, blockBytes, filepath));
 		return true;
 	}
 
