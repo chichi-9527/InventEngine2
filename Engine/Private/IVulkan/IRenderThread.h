@@ -23,10 +23,11 @@ namespace INVENT
 
 	private:
 		bool _init_vulkan();
+		void _render_loop();
 
 	private:
 		CreateSurfaceFunc _create_surface = nullptr;
-
+		std::thread _thread;
 		std::atomic_bool _running{ false };
 	};
 }

@@ -3,6 +3,7 @@
 #include "ILog.h"
 #include "IVulkan/VulkanBase.h"
 #include "IVulkan/IVulkanRenderer.h"
+#include "IVulkan/VulkanConfig.h"
 
 namespace INVENT
 {
@@ -14,22 +15,28 @@ namespace INVENT
 
 	bool IRenderThread::Start()
 	{
-		_running = true;
+		if (_running.exchange(true)) return false;
+
 		if (!_init_vulkan())
 		{
+			_running = false;
 			return false;
 		}
 		if (!IVulkanRenderer::Init())
 		{
 			INVENT_LOG_ERROR("[IRenderThread] Init Vulkan renderer error.");
+			_running = false;
 			return false;
 		}
-
+		_thread = std::thread(&IRenderThread::_render_loop, this);
 		return true;
 	}
 
 	void IRenderThread::Shutdown()
 	{
+		_running.store(false);
+		if (_thread.joinable())
+			_thread.join();		// 渲染线程退出后才能销毁 Vulkan 资源
 		IVulkanRenderer::Shutdown();
 		INVENT_LOG_INFO("[IRenderThread] shutdown.");
 	}
@@ -75,6 +82,19 @@ namespace INVENT
 		}
 
 		return true;
+	}
+
+	void IRenderThread::_render_loop()
+	{
+		std::uint32_t frame = 0;
+		while (_running.load(std::memory_order_relaxed))
+		{
+			
+			IVulkanRenderer::BeginRender(frame);
+			IVulkanRenderer::RenderFrame(frame);
+			IVulkanRenderer::EndRender();
+			frame = (frame + 1) % IVulkan::MAX_FRAMES_IN_FLIGHT;
+		}
 	}
 
 	void IRenderThreadBase::SetVulkanInstanceExtension(const char* extension_name)
