@@ -517,10 +517,10 @@ namespace INVENT
 		uboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS; // 每幀需要 1 個，總共需要 maxAllocatedSets 個
 		poolSizes.push_back(uboPoolSize);
 
-		// 2. 為 Set 0 binding 1 的全域點光源 Storage Buffer (point light ssbo) 規劃空間
+		// 2. 為 Set 0 binding 1~4 的 buffer 規劃空間
 		VkDescriptorPoolSize ssboPoolSize{};
 		ssboPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		ssboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS * 3; // 每幀需要 3 個
+		ssboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS * 4; // 每幀需要 4 個
 		poolSizes.push_back(ssboPoolSize);
 
 		VkDescriptorPoolCreateInfo poolInfo{};
@@ -571,11 +571,21 @@ namespace INVENT
 		indirectCommandSSBOLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		indirectCommandSSBOLayoutBinding.descriptorCount = 1;
 		indirectCommandSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT; // 主要由 Compute Shader 寫入
+
+		// binding 4 : 纹理流式 mip 反馈 SSBO
+		// 视锥裁剪 CS InterlockedMin 写 -> 帧末拷 readback -> CPU 下下帧读
+		VkDescriptorSetLayoutBinding mipFeedbackLayoutBinding{};
+		mipFeedbackLayoutBinding.binding = 4;
+		mipFeedbackLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		mipFeedbackLayoutBinding.descriptorCount = 1;
+		mipFeedbackLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+		mipFeedbackLayoutBinding.pImmutableSamplers = nullptr;
 		std::vector<VkDescriptorSetLayoutBinding> set0Bindings = {
 			uboLayoutBinding,
 			pointLightSSBOLayoutBinding,
 			instanceDataSSBOLayoutBinding,
-			indirectCommandSSBOLayoutBinding
+			indirectCommandSSBOLayoutBinding,
+			mipFeedbackLayoutBinding
 		};
 		auto set0Layout = _create_descriptor_set_layout(set0Bindings);
 
@@ -844,6 +854,25 @@ namespace INVENT
 		}
 
 		return graphicsPipeline;
+	}
+
+	VkPipeline IVulkanBase::CreateComputePipeline(VkShaderModule compute_shader)
+	{
+		if (compute_shader == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+		VkComputePipelineCreateInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		info.stage.module = compute_shader;
+		info.stage.pName = "main";
+		info.layout = _global_pipeline_layout;	// 与图形管线同一套 set0/set1
+		VkPipeline pipeline = VK_NULL_HANDLE;
+		if (VkResult r = vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create compute pipeline! VkResult: {}.", static_cast<std::int32_t>(r)));
+			return VK_NULL_HANDLE;
+		}
+		return pipeline;
 	}
 
 	VkShaderModule IVulkanBase::CreateShaderMoudle(const std::string& path)

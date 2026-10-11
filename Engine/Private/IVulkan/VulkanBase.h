@@ -112,6 +112,7 @@ namespace INVENT
 
 		};
 		VkPipeline CreateGraphicsPipeline(const GraphicsPipelineConfig& config);
+		VkPipeline CreateComputePipeline(VkShaderModule compute_shader);
 		VkShaderModule CreateShaderMoudle(const std::string& path);
 		void DestroyShaderMoudle(VkShaderModule shader_moudle);
 		VkDeviceAddress GetBufferDeviceAddress(VkBuffer buffer);
@@ -178,6 +179,7 @@ namespace INVENT
 
 		QueueFamilyIndices GetQueueFamilyIndices() const { return _queue_family_indices; }
 		VkQueue GetTransferQueue() const { return _transfer_queue; }
+		VkQueue GetPresentQueue() const { return _present_queue; }
 		VkQueue GetGraphicsQueue() const { return _graphics_queue; }
 		VkFormat GetSwapChainImageFormat() const { return _swap_chain_image_format; }
 		VkFormat GetDepthFormat() const { return _depth_format; }
@@ -185,6 +187,10 @@ namespace INVENT
 		VkInstance GetVkInstance() const { return _instance; }
 		VkDevice GetDevice() const { return _device; }
 		VkSwapchainKHR GetSwapChain() const { return _swap_chain; }
+		const std::vector<VkImage>& GetSwapChainImages() const { return _swap_chain_images; }
+		const std::vector<VkImageView>& GetSwapChainImageViews() const { return _swap_chain_image_views; }
+		VkExtent2D GetSwapChainExtent() const { return _swap_chain_extent; }
+		VkDescriptorSet GetGlobalBindlessDescriptorSet() const { return _global_bindless_descriptor_set; }
 		const VkPhysicalDeviceProperties& GetPhysicalDeviceProperties() const { return _physical_device_properties; }
 		const VkPhysicalDeviceMemoryProperties& GetPhysicalDeviceMemoryProperties() const { return _physical_device_memory_properties; }
 		uint32_t GetCurrentBindlessDescriptorCount() const { return _current_descriptor_count; }
