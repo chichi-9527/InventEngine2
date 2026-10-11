@@ -26,7 +26,7 @@ namespace INVENT
 	class InstanceBuffer
 	{
 	public:
-		enum InstanceUseFlag : std::uint32_t {
+		enum InstanceOptionFlag : std::uint32_t {
 			NoUse = 0,
 			UseUV = 1 << 0,
 			ShowInstance = 1 << 1
@@ -43,7 +43,7 @@ namespace INVENT
 			std::uint32_t IndexCount{ 0 };
 			std::uint32_t BoneCount{ 0 };
 			std::uint32_t ObjectID{ 0 };			// 为0时视为无效，计算着色器使用
-			std::uint32_t UseFlags = InstanceUseFlag::NoUse;
+			std::uint32_t InstanceOptionFlags = InstanceOptionFlag::NoUse;
 		};
 		static_assert(alignof(InstanceData) == 16);
 		static_assert(sizeof(InstanceData) == 144);
@@ -52,7 +52,7 @@ namespace INVENT
 		static_assert(offsetof(InstanceData, UV) == 96);
 		static_assert(offsetof(InstanceData, Color) == 112);
 		static_assert(offsetof(InstanceData, IndexCount) == 128);
-		static_assert(offsetof(InstanceData, UseFlags) == 140);
+		static_assert(offsetof(InstanceData, InstanceOptionFlags) == 140);
 
 		struct Handle 
 		{
