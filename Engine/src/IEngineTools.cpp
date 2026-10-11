@@ -22,11 +22,11 @@ namespace INVENT
 		}
 
 		size_t fileSize = (size_t)file.tellg();
-		out.resize(fileSize + 1);
+		out.resize(fileSize);
 		file.seekg(0);
 		file.read(out.data(), fileSize);
 		file.close();
-		out[fileSize] = '\0';
+
 		return true;
 	}
 
