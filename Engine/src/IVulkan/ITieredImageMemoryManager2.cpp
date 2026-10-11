@@ -36,6 +36,7 @@ namespace INVENT
 			if (VkResult result = IVulkanBase::Base().UseVmaCreateBuffer(IVulkan::DEF_STAGING_BUFFER_SIZE,
 				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 				stagingPools[i].buffer,
 				&(stagingPools[i].mappedData)))
 			{
