@@ -130,11 +130,6 @@ namespace INVENT
 			INVENT_LOG_FATAL("[VulkanBase] 需要的最低 vulkan 版本为 1.3");
 			return false;
 		}
-		if (_wait_for_window_events == nullptr)
-		{
-			INVENT_LOG_ERROR("[VulkanBase] 你需要设置等待窗口事件的函数.");
-			return false;
-		}
 
 #ifdef VULKAN_VALITADION_LAYER
 		IVulkanBase::AddValidationLayer("VK_LAYER_KHRONOS_validation");
@@ -334,6 +329,11 @@ namespace INVENT
 			return false;
 		}
 		auto extent = _choose_swap_extent(_swap_chain_support.Capabilities);
+		if (extent.width == 0 || extent.height == 0)
+		{
+			INVENT_LOG_WARNING("[VulkanBase] [CreateSwapChain] extent.width == 0 || extent.height == 0.");
+			return false;
+		}
 
 		uint32_t imageCount = _swap_chain_support.Capabilities.minImageCount + 1;
 		if (_swap_chain_support.Capabilities.maxImageCount > 0 && imageCount > _swap_chain_support.Capabilities.maxImageCount)
@@ -383,13 +383,18 @@ namespace INVENT
 		createInfo.presentMode = presentMode;
 		createInfo.clipped = VK_TRUE;
 		//
-		createInfo.oldSwapchain = VK_NULL_HANDLE;
+		createInfo.oldSwapchain = _old_swap_chain;
 
 		// 
 		if (VkResult result = vkCreateSwapchainKHR(_device, &createInfo, nullptr, &_swap_chain))
 		{
 			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create a swapchain! VkResult: {}.", static_cast<int32_t>(result)));
 			return false;
+		}
+		if (_old_swap_chain != VK_NULL_HANDLE)
+		{
+			vkDestroySwapchainKHR(_device, _old_swap_chain, nullptr);
+			_old_swap_chain = VK_NULL_HANDLE;
 		}
 
 		uint32_t swapchainImageCount;
@@ -422,6 +427,30 @@ namespace INVENT
 				INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to Create SwapChainImageView! the number: {}.", i));
 				return false;
 			}
+		}
+
+		return true;
+	}
+
+	bool IVulkanBase::RecreateSwapChain()
+	{
+		auto& engine = IEngine::Instatnce();
+		while (engine.GetWindowWidth() == 0 || engine.GetWindowHeight() == 0)
+		{
+			if (engine.GetEngineShouldExit().load(std::memory_order_acquire))
+			{
+				engine.GetEngineShouldExit().store(false, std::memory_order_release);
+				return false;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+		vkDeviceWaitIdle(_device);
+
+		if (!_cleanup_swap_chain() ||
+			!CreateSwapChain() ||
+			!CreateSwapChainImageView())
+		{
+			return false;
 		}
 
 		return true;
@@ -687,6 +716,125 @@ namespace INVENT
 		}
 
 		return true;
+	}
+
+	void IVulkanBase::Terminate()
+	{
+		// 1. 確保設備目前沒有正在執行的異步任務
+		if (_device != VK_NULL_HANDLE)
+		{
+			vkDeviceWaitIdle(_device);
+		}
+
+		// 2. 銷毀指令池（會連同從該池分配的 Command Buffers 一併釋放）
+		if (_command_pool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(_device, _command_pool, nullptr);
+			_command_pool = VK_NULL_HANDLE;
+		}
+		if (_transfer_command_pool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(_device, _transfer_command_pool, nullptr);
+			_transfer_command_pool = VK_NULL_HANDLE;
+		}
+
+		// 3. 銷毀 Swapchain 相關資源（Image Views）
+		// 註：Swapchain 的 VkImage 是由 Swapchain 管理的，不需要手動 vkDestroyImage
+		for (auto imageView : _swap_chain_image_views)
+		{
+			if (imageView != VK_NULL_HANDLE)
+			{
+				vkDestroyImageView(_device, imageView, nullptr);
+			}
+		}
+		_swap_chain_image_views.clear();
+		_swap_chain_images.clear();
+
+		// 4. 銷毀 Swapchain 本身
+		if (_swap_chain != VK_NULL_HANDLE)
+		{
+			vkDestroySwapchainKHR(_device, _swap_chain, nullptr);
+			_swap_chain = VK_NULL_HANDLE;
+		}
+		if (_old_swap_chain != VK_NULL_HANDLE)
+		{
+			vkDestroySwapchainKHR(_device, _old_swap_chain, nullptr);
+			_old_swap_chain = VK_NULL_HANDLE;
+		}
+
+		// 5. 銷毀描述符池（會連同分配的 Descriptor Sets 一併釋放，包含您的 Bindless Set）
+		if (_bindless_descriptor_pool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(_device, _bindless_descriptor_pool, nullptr);
+			_bindless_descriptor_pool = VK_NULL_HANDLE;
+			_global_bindless_descriptor_set = VK_NULL_HANDLE;
+		}
+		if (_other_descriptor_pool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(_device, _other_descriptor_pool, nullptr);
+			_other_descriptor_pool = VK_NULL_HANDLE;
+		}
+
+		// 6. 銷毀 Pipeline Layout 與 Descriptor Set Layouts
+		if (_global_pipeline_layout != VK_NULL_HANDLE)
+		{
+			vkDestroyPipelineLayout(_device, _global_pipeline_layout, nullptr);
+			_global_pipeline_layout = VK_NULL_HANDLE;
+		}
+		for (auto layout : _descriptor_set_layouts)
+		{
+			if (layout != VK_NULL_HANDLE)
+			{
+				vkDestroyDescriptorSetLayout(_device, layout, nullptr);
+			}
+		}
+		_descriptor_set_layouts.clear();
+
+		if (vmaAllocator != nullptr)
+		{ // 註：VMA 句柄通常是指針類型，與 nullptr 比較
+			vmaDestroyAllocator(vmaAllocator);
+			vmaAllocator = nullptr;
+		}
+
+		// 7. 銷毀邏輯設備（VkQueue 不需要手動銷毀，它們會隨著 Device 銷毀而自動釋放）
+		if (_device != VK_NULL_HANDLE)
+		{
+			vkDestroyDevice(_device, nullptr);
+			_device = VK_NULL_HANDLE;
+			_graphics_queue = VK_NULL_HANDLE;
+			_present_queue = VK_NULL_HANDLE;
+			_transfer_queue = VK_NULL_HANDLE;
+		}
+
+		// 8. 銷毀 Surface 視窗表面（必須在 Instance 銷毀前完成）
+		if (_surface != VK_NULL_HANDLE)
+		{
+			vkDestroySurfaceKHR(_instance, _surface, nullptr);
+			_surface = VK_NULL_HANDLE;
+		}
+
+		// 9. 銷毀除錯回調
+		if (_debug_messenger != VK_NULL_HANDLE)
+		{
+			auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(_instance, "vkDestroyDebugUtilsMessengerEXT");
+			if (func != nullptr)
+			{
+				func(_instance, _debug_messenger, nullptr);
+			}
+			_debug_messenger = VK_NULL_HANDLE;
+		}
+
+		// 10. 最後銷毀 Vulkan 實例
+		if (_instance != VK_NULL_HANDLE)
+		{
+			vkDestroyInstance(_instance, nullptr);
+			_instance = VK_NULL_HANDLE;
+		}
+
+		// 11. 重置其他基礎型別或結構體狀態
+		_physical_device = VK_NULL_HANDLE;
+		_current_descriptor_count = 0;
+		_swap_chain_image_count = 0;
 	}
 
 	VkResult IVulkanBase::AllocateDescriptSetFromOtherDescriptorPools(VkDescriptorSet& descriptor_set, size_t layout_index)
@@ -1627,17 +1775,20 @@ namespace INVENT
 
 	VkExtent2D IVulkanBase::_choose_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities)
 	{
-		if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max())
+		if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() &&
+			capabilities.currentExtent.width != 0 && capabilities.currentExtent.height != 0)
 		{
 			return capabilities.currentExtent;
 		}
-		else
-		{
-			VkExtent2D actualExtent = { _frame_buffer_width, _frame_buffer_height };
-			actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-			actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-			return actualExtent;
-		}
+
+		auto& engine = IEngine::Instatnce();
+		VkExtent2D actualExtent = { engine.GetWindowWidth() , engine.GetWindowHeight() };
+		if (actualExtent.width == 0 || actualExtent.height == 0)
+			actualExtent = { 1, 1 };
+		actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+		actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+		return actualExtent;
+
 	}
 
 	VkFormat IVulkanBase::_find_supported_format(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features)
@@ -1705,6 +1856,22 @@ namespace INVENT
 		}
 
 		return descriptorSetLayout;
+	}
+
+	bool IVulkanBase::_cleanup_swap_chain()
+	{
+		for (auto& imageView : _swap_chain_image_views)
+		{
+			vkDestroyImageView(_device, imageView, nullptr);
+			imageView = VK_NULL_HANDLE;
+		}
+		if (_swap_chain != VK_NULL_HANDLE)
+		{
+			_old_swap_chain = _swap_chain;
+			_swap_chain = VK_NULL_HANDLE;
+		}
+		
+		return true;
 	}
 
 #ifdef VULKAN_VALITADION_LAYER

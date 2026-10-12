@@ -13,7 +13,7 @@ namespace INVENT
 {
 	bool IWindow::InitWindow(uint32_t width, uint32_t height, std::string title, bool is_resizable)
 	{
-		this->_window_size.store({ width,height,true });
+		this->_window_size= { width,height };
 		this->_is_resizable = is_resizable;
 
 		glfwSetErrorCallback([](int error, const char* description) {
@@ -57,8 +57,8 @@ namespace INVENT
 		glfwSetFramebufferSizeCallback(_glfw_window, [](GLFWwindow* window, int width, int height) {
 			if (IWindow* iwindow = reinterpret_cast<IWindow*>(glfwGetWindowUserPointer(window)))
 			{
-				WindowSize size{ static_cast<uint32_t>(width), static_cast<uint32_t>(height) , true };
-				iwindow->_window_size.store(size, std::memory_order_release);
+				iwindow->_window_size = { static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+				iwindow->_framebuffer_size_callback(width, height);
 			}
 			});
 		glfwSetKeyCallback(_glfw_window, [](GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -100,16 +100,4 @@ namespace INVENT
 		glfwTerminate();
 	}
 
-	void IWindow::_framebuffer_size_callback(int width, int height)
-	{}
-	void IWindow::_register_key_callback(int key, int scancode, int action, int mods)
-	{}
-	void IWindow::_cursor_position_callback(double xpos, double ypos)
-	{}
-	void IWindow::_mouse_button_callback(int button, int action, int mods)
-	{}
-	void IWindow::_scroll_callback(double xoffset, double yoffset)
-	{}
-	void IWindow::_cursor_enter_callback(int entered)
-	{}
 }

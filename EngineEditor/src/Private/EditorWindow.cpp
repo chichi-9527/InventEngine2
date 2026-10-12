@@ -77,12 +77,7 @@ bool EditorWindow::Start()
             return glfwCreateWindowSurface(instance, IWindow::_glfw_window, allocator, surface);
         }
     );
-    INVENT::IRenderThreadBase::Instance().SetVulkanWaitForWindowEventsFunction(
-        []()
-        {
-            glfwWaitEvents();
-        }
-    );
+    INVENT::IEngine::Instatnce().ChangeWindowSize(this->_window_size.Width, this->_window_size.Height);
     if (!INVENT::IRenderThreadBase::Instance().Start())
     {
         Terminate();
@@ -106,7 +101,7 @@ bool EditorWindow::Start()
         glfwPollEvents();
     }
 
-    
+    INVENT::IEngine::Instatnce().EngineExit();
     INVENT::IRenderThreadBase::Instance().Shutdown();
 //#if !WITH_EDITOR
     End();
@@ -228,6 +223,26 @@ void EditorWindow::UnLoadGame()
     }
     INVENT_LOG_INFO("[Game] 外部遊戲模組已安全卸載。");
 }
+
+void EditorWindow::_framebuffer_size_callback(int width, int height)
+{
+    INVENT::IEngine::Instatnce().ChangeWindowSize(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
+}
+
+void EditorWindow::_register_key_callback(int key, int scancode, int action, int mods)
+{}
+
+void EditorWindow::_cursor_position_callback(double xpos, double ypos)
+{}
+
+void EditorWindow::_mouse_button_callback(int button, int action, int mods)
+{}
+
+void EditorWindow::_scroll_callback(double xoffset, double yoffset)
+{}
+
+void EditorWindow::_cursor_enter_callback(int entered)
+{}
 
 std::string EditorWindow::_get_dll_path()
 {

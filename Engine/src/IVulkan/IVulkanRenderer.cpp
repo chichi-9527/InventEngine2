@@ -6,6 +6,7 @@
 #include "IVulkan/IVulkanGlobalVerticesIndices.h"
 #include "IVulkan/IVulkanInstanceBuffer.h"
 #include "ILog.h"
+#include "IEngine.h"
 
 #include <cstring>
 
@@ -138,6 +139,32 @@ namespace INVENT
 		vkUpdateDescriptorSets(IVulkanBase::Base().GetDevice(), 1, &w, 0, nullptr);
 	}
 
+	bool IVulkanRenderer::_recreate_swapchain()
+	{
+		auto& base = IVulkanBase::Base();
+		auto device = base.GetDevice();
+
+		if (!base.RecreateSwapChain())
+		{
+			return false;
+		}
+		for (auto f : _frame_fences)
+			if (f != VK_NULL_HANDLE) vkDestroyFence(device, f, nullptr);
+		for (auto s : _acquire_semaphores)
+			if (s != VK_NULL_HANDLE) vkDestroySemaphore(device, s, nullptr);
+		for (auto s : _submit_semaphores)
+			if (s != VK_NULL_HANDLE) vkDestroySemaphore(device, s, nullptr);
+		_frame_fences.clear(); _acquire_semaphores.clear(); _submit_semaphores.clear();
+
+		if (!base.CreateSyncObjects(_frame_fences, _acquire_semaphores, _submit_semaphores))
+		{
+			INVENT_LOG_FATAL("[IVulkanRenderer] 同步对象重建失败!");
+			return false;
+		}
+
+		return true;
+	}
+
 	bool IVulkanRenderer::_init_frames()
 	{
 		auto& base = IVulkanBase::Base();
@@ -244,12 +271,25 @@ namespace INVENT
 
 	void IVulkanRenderer::BeginRender(std::uint32_t frameindex)
 	{
+		auto& engine = IEngine::Instatnce();
 		auto& base = IVulkanBase::Base();
 		auto device = base.GetDevice();
 		auto& texMgmt = IVulkanTexture2DManagement::Instance();
 
 		_current_frame = frameindex;
 		_frame_skipped = false;
+
+		if (_swapchain_dirty)
+		{
+			if (std::chrono::steady_clock::now() < _recreate_cooldown_until) { _frame_skipped = true; return; }
+			if (!_recreate_swapchain())
+			{
+				_frame_skipped = true;
+				_recreate_cooldown_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+				return;
+			}
+			_swapchain_dirty = false;
+		}
 
 		// 1) 帧同步
 		vkWaitForFences(device, 1, &_frame_fences[frameindex], VK_TRUE, UINT64_MAX);
@@ -265,9 +305,15 @@ namespace INVENT
 			_acquire_semaphores[frameindex], VK_NULL_HANDLE, &_image_index);
 		if (acq == VK_ERROR_OUT_OF_DATE_KHR)
 		{
-			// TODO: resize 重建交换链; 本阶段跳过 (fence 保持已信号, 不会死锁)
+			_swapchain_dirty = true;
+			INVENT_LOG_INFO("[IVulkanRenderer] recreate swap chain reason: VK_ERROR_OUT_OF_DATE_KHR");
 			_frame_skipped = true;
 			return;
+		}
+		if (acq == VK_SUBOPTIMAL_KHR)
+		{
+			_swapchain_dirty = true;	// acquire 已成功, 信号量会被本帧 submit 消费掉 -> 照常渲染
+			INVENT_LOG_INFO("[IVulkanRenderer] recreate swap chain reason: VK_SUBOPTIMAL_KHR");
 		}
 		vkResetFences(device, 1, &_frame_fences[frameindex]);
 
@@ -387,9 +433,11 @@ namespace INVENT
 		pi.pSwapchains = &swapchain;
 		pi.pImageIndices = &_image_index;
 		VkResult pr = vkQueuePresentKHR(base.GetPresentQueue(), &pi);
-		if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR)
+		if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR || IEngine::Instatnce().GetWindowSizeResized().load(std::memory_order_acquire))
 		{
-			// TODO: resize
+			_swapchain_dirty = true;
+			//INVENT_LOG_INFO("[IVulkanRenderer] recreate swap chain reason: VK_ERROR_OUT_OF_DATE_KHR | VK_SUBOPTIMAL_KHR | window resized");
+			IEngine::Instatnce().GetWindowSizeResized().store(false, std::memory_order_release);
 		}
 
 		// 验证输出
@@ -468,5 +516,13 @@ namespace INVENT
 		if (_test_texture_slot != UINT32_MAX)
 			IVulkanTexture2DManagement::Instance().DestroyTexture2D({ _test_texture_slot });
 		_test_texture_slot = UINT32_MAX;
+
+		for (auto f : _frame_fences)
+			if (f != VK_NULL_HANDLE) vkDestroyFence(device, f, nullptr);
+		for (auto s : _acquire_semaphores)
+			if (s != VK_NULL_HANDLE) vkDestroySemaphore(device, s, nullptr);
+		for (auto s : _submit_semaphores)
+			if (s != VK_NULL_HANDLE) vkDestroySemaphore(device, s, nullptr);
+		_frame_fences.clear(); _acquire_semaphores.clear(); _submit_semaphores.clear();
 	}
 }

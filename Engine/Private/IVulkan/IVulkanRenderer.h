@@ -4,6 +4,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <chrono>
 
 namespace INVENT
 {
@@ -35,6 +36,7 @@ namespace INVENT
 		static bool _init_test_resources();	// 全局采样器 + set1 + 测试纹理
 		static void _record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present);
 		static void _write_buffer_binding(VkDescriptorSet set, std::uint32_t binding, VkBuffer buffer, bool is_ubo);
+		static bool _recreate_swapchain();
 		static void _clear();
 
 	private:
@@ -62,9 +64,12 @@ namespace INVENT
 		inline static VkSampler _global_sampler = VK_NULL_HANDLE;
 		inline static std::uint32_t _test_texture_slot = UINT32_MAX;
 
+		inline static std::chrono::steady_clock::time_point _recreate_cooldown_until;
+
 		inline static std::uint32_t _image_index{ 0 };
 		inline static std::uint32_t _current_frame{ 0 };	// EndRender 用
 		inline static bool _frame_skipped{ false };
+		inline static bool _swapchain_dirty{ false };
 		inline static std::uint64_t _debug_frame{ 0 };
 	};
 }

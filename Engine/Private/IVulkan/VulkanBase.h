@@ -60,7 +60,6 @@ namespace INVENT
 
 		static IVulkanBase& Base();
 
-		void SetWaitForWindowEventsFunction(WaitForWindowEventsFunc func) { _wait_for_window_events = func; }
 		void SetSurface(VkSurfaceKHR surface) { if (!_surface) _surface = surface; }
 		bool CreateVulkanInstance();
 		bool PickPhysicalDevice();
@@ -68,6 +67,7 @@ namespace INVENT
 		bool CreateLogicalDevice();
 		bool CreateSwapChain();
 		bool CreateSwapChainImageView();
+		bool RecreateSwapChain();
 		bool CreateVmaAllocator();
 		bool FindDepthFormat();
 		bool InitializeAllOffscreenPasses();
@@ -77,6 +77,8 @@ namespace INVENT
 		bool CreateGlobalPipelineLayout();
 		bool AllocaGlobalBindlessDescriptorSet();
 		bool CreateCommandPool();
+
+		void Terminate();
 
 		// tools
 
@@ -208,14 +210,13 @@ namespace INVENT
 		VkExtent2D _choose_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities);
 		VkFormat _find_supported_format(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 		VkDescriptorSetLayout _create_descriptor_set_layout(std::vector<VkDescriptorSetLayoutBinding>& bindings, bool is_bindless_set = false);
+		bool _cleanup_swap_chain();
 
 #ifdef VULKAN_VALITADION_LAYER
 		bool _check_validation_layers();
 		bool _setup_debug_messenger();
 #endif // !VULKAN_VALITADION_LAYER
 	private:
-		WaitForWindowEventsFunc _wait_for_window_events = nullptr;
-
 		VkInstance _instance = VK_NULL_HANDLE;
 		VkDevice _device = VK_NULL_HANDLE;
 		VkSurfaceKHR _surface = VK_NULL_HANDLE;
@@ -224,6 +225,7 @@ namespace INVENT
 		VkQueue _present_queue = VK_NULL_HANDLE;
 		VkQueue _transfer_queue = VK_NULL_HANDLE;
 		VkSwapchainKHR _swap_chain = VK_NULL_HANDLE;
+		VkSwapchainKHR _old_swap_chain = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT _debug_messenger = VK_NULL_HANDLE;
 		VkDescriptorPool _bindless_descriptor_pool = VK_NULL_HANDLE;
 		VkDescriptorPool _other_descriptor_pool = VK_NULL_HANDLE;
@@ -240,7 +242,6 @@ namespace INVENT
 
 		std::vector<VkImage> _swap_chain_images;
 		std::vector<VkImageView> _swap_chain_image_views;
-		std::vector<VkFramebuffer> _swap_chain_framebuffers;
 
 		SwapChainSupportDetails _swap_chain_support{};
 		QueueFamilyIndices _queue_family_indices{};
@@ -251,13 +252,10 @@ namespace INVENT
 		VkFormat _depth_format{ VK_FORMAT_UNDEFINED };
 		VkFormat _shadow_depth_format{ VK_FORMAT_UNDEFINED };
 		std::uint32_t _api_version{ VK_API_VERSION_1_0 };
-		std::uint32_t _frame_buffer_width{ 0 };
-		std::uint32_t _frame_buffer_height{ 0 };
 		std::uint32_t _swap_chain_image_count{ 0 };
 		std::uint32_t _current_descriptor_count{ 0 };
 		std::uint32_t _absolute_descriptor_limit{ 0 };
 
-		bool _framebuffer_resized = false;
 	};
 
 	
