@@ -39,6 +39,7 @@ namespace INVENT
 			_thread.join();		// 渲染线程退出后才能销毁 Vulkan 资源
 		IVulkanRenderer::Shutdown();
 		INVENT_LOG_INFO("[IRenderThread] shutdown.");
+		_shutdown_vulkan();
 	}
 
 	bool IRenderThread::_init_vulkan()
@@ -84,6 +85,11 @@ namespace INVENT
 		return true;
 	}
 
+	void IRenderThread::_shutdown_vulkan()
+	{
+		IVulkanBase::Base().Terminate();
+	}
+
 	void IRenderThread::_render_loop()
 	{
 		std::uint32_t frame = 0;
@@ -102,8 +108,4 @@ namespace INVENT
 		IVulkanBase::AddInstanceExtension(extension_name);
 	}
 
-	void IRenderThreadBase::SetVulkanWaitForWindowEventsFunction(void(*func)())
-	{
-		IVulkanBase::Base().SetWaitForWindowEventsFunction(func);
-	}
 }

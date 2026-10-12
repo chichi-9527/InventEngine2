@@ -23,6 +23,7 @@ namespace INVENT
 
 	private:
 		bool _init_vulkan();
+		void _shutdown_vulkan();
 		void _render_loop();
 
 	private:

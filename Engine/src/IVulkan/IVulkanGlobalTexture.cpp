@@ -158,6 +158,8 @@ namespace INVENT
 			}
 		}
 
+		TexMemManager::Clear();
+
 		// 5) 默认贴图
 		for (auto& dt : _default_textures)
 		{
