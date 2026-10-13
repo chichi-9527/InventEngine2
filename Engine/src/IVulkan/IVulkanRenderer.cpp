@@ -5,6 +5,7 @@
 #include "IVulkan/IVulkanGlobalTexture.h"
 #include "IVulkan/IVulkanGlobalVerticesIndices.h"
 #include "IVulkan/IVulkanInstanceBuffer.h"
+#include "IVulkan/IVulkanGlobalMaterial.h"
 #include "ILog.h"
 #include "IEngine.h"
 
@@ -32,8 +33,9 @@ namespace INVENT
 					// 材质 baseMip 更新接入点 (测试阶段空实现)
 			});
 
-		// 管理器 (顺序: 纹理 -> 顶点索引 -> 实例)
+		// 管理器 (顺序: 纹理 -> 材质 -> 顶点索引 -> 实例)
 		if (!IVulkanTexture2DManagement::Instance().Init() ||
+			!IVulkanGlobalMaterial::Instance().Init() ||
 			!IVulkanGlobalVerticesIndices::Instance().Init() ||
 			!InstanceBuffer::Init())
 		{
@@ -48,6 +50,8 @@ namespace INVENT
 		{
 			return false;
 		}
+
+		_vk_clear.color = { 0.02f, 0.02f, 0.04f, 1.0f };
 
 		INVENT_LOG_INFO("[IVulkanRenderer] init done.");
 		return true;
@@ -344,6 +348,9 @@ namespace INVENT
 		// 2) 交换链: UNDEFINED -> COLOR_ATTACHMENT (srcStage 与提交时的 acquire 等待阶段对齐)
 		_record_swapchain_barrier(cmd, swapImage, false);
 
+		// 脏材质上传 + 读屏障
+		IVulkanGlobalMaterial::Instance().FlushDirtyMaterials(cmd, frameindex);
+
 		// 3) mip 反馈 CS (裁剪 CS 的测试替身)
 		texMgmt.ResetMipFeedback(cmd, frameindex);		// fill 0xFF + transfer->compute 屏障
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -367,16 +374,13 @@ namespace INVENT
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-		VkClearValue clear{};
-		clear.color = { 0.02f, 0.02f, 0.04f, 1.0f };
-
 		VkRenderingAttachmentInfo color{};
 		color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		color.imageView = base.GetSwapChainImageViews()[_image_index];
 		color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		color.clearValue = clear;
+		color.clearValue = _vk_clear;
 
 		VkRenderingInfo ri{};
 		ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -489,6 +493,7 @@ namespace INVENT
 		_clear();
 		InstanceBuffer::Destroy();
 		IVulkanGlobalVerticesIndices::Instance().Destroy();
+		IVulkanGlobalMaterial::Instance().Clear();
 		IVulkanTexture2DManagement::Instance().Clear();		// 内部会冲刷帧延迟销毁环
 		IVulkanTexture2DManagement::Instance().Terminate();
 	}

@@ -28,6 +28,7 @@ namespace INVENT
 		static void RenderFrame(std::uint32_t frameindex);
 		static void EndRender();
 
+		static void SetClearColor(VkClearColorValue v) { _vk_clear.color = v; }
 	private:
 		static bool _init_buffers();			// ubo(预留) + 测试实例 + 占位 ssbo
 		static bool _init_descriptor_sets();	// set0 x 帧数 (一个 set 含全部 binding!)
@@ -60,6 +61,8 @@ namespace INVENT
 		inline static void* _test_instance_mapped = nullptr;
 		// 未使用 binding (1灯光/3间接命令) 的占位, 防未更新告警
 		inline static VkBuffer _dummy_ssbo = VK_NULL_HANDLE;
+
+		inline static VkClearValue _vk_clear{};
 
 		inline static VkSampler _global_sampler = VK_NULL_HANDLE;
 		inline static std::uint32_t _test_texture_slot = UINT32_MAX;
