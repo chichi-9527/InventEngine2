@@ -33,6 +33,8 @@ namespace IVulkan
 	constexpr std::uint32_t DEF_ONE_BUFFER_VERTEX_COUNT = 1u * 1024 * 1024; // 默认 vertex buffer 顶点个数 1M(个)
 	constexpr std::uint32_t DEF_RESIDENT_VERTEX_BUFFER_COUNT = 2u * 1024; // 默认常驻顶点 buffer 顶点个数 2048(个)
 	constexpr std::uint32_t DEF_RESIDENT_INDEX_BUFFER_COUNT = 4u * 1024; // 默认常驻索引 buffer 顶点个数 4096(个)
+	constexpr std::uint32_t DEF_MATERIAL_COUNT_PER_BUFFER = 16384;		// 每个材质 buffer 槽位数 (16384 * 32B = 512KB)
+	constexpr VkDeviceSize DEF_MATERIAL_DIRTY_STAGING_BYTES = 256 * 1024;	// 每帧脏上传上限 (256KB = 8192 材质/帧, 溢出部分留到下帧)
 
 	inline VkDeviceSize TotalVRAM{ 0 };
 	// 计算出的各种 buffer 的总大小(B) ,总显存(TotalVRAM)的 70%
