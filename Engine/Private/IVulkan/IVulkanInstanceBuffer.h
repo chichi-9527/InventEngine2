@@ -44,7 +44,8 @@ namespace INVENT
 			std::uint32_t IndexCount{ 0 };
 			std::uint32_t BoneCount{ 0 };
 			std::uint32_t ObjectID{ 0 };			// 为0时视为无效，计算着色器使用
-			std::uint32_t InstanceOptionFlags = InstanceOptionFlag::NoUse;
+			std::uint16_t InstanceOptionFlags = InstanceOptionFlag::NoUse;
+			std::uint16_t LevelID{ 0xFFFF };
 		};
 		static_assert(alignof(InstanceData) == 16);
 		static_assert(sizeof(InstanceData) == 144);
@@ -54,6 +55,7 @@ namespace INVENT
 		static_assert(offsetof(InstanceData, Color) == 112);
 		static_assert(offsetof(InstanceData, IndexCount) == 128);
 		static_assert(offsetof(InstanceData, InstanceOptionFlags) == 140);
+		static_assert(offsetof(InstanceData, LevelID) == 142);
 
 		struct Handle 
 		{
