@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 #include <functional>
+#include <mutex>
 
 namespace INVENT
 {
@@ -202,6 +203,7 @@ namespace INVENT
 		VkPipelineLayout GetVkPipelineLayout() const { return _global_pipeline_layout; }
 		const std::uint32_t GetAPIVersion() const noexcept { return _api_version; }
 		bool Version_1_3_OrHigher() const noexcept { return _api_version >= VK_API_VERSION_1_3; }
+		std::mutex& GetQueueMutex() { return _queue_mutex; }
 	private:
 		const std::uint32_t _use_lastest_api_version();
 		QueueFamilyIndices _find_queue_families(VkPhysicalDevice device);
@@ -260,6 +262,8 @@ namespace INVENT
 		std::uint32_t _swap_chain_image_count{ 0 };
 		std::uint32_t _current_descriptor_count{ 0 };
 		std::uint32_t _absolute_descriptor_limit{ 0 };
+
+		std::mutex _queue_mutex; // VkQueue 锁
 
 	};
 

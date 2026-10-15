@@ -449,10 +449,13 @@ namespace INVENT
 		si.signalSemaphoreCount = 1;
 		si.pSignalSemaphores = &_submit_semaphores[_image_index];
 
-		if (vkQueueSubmit(base.GetGraphicsQueue(), 1, &si, _frame_fences[f]))
 		{
-			INVENT_LOG_ERROR("[IVulkanRenderer] 提交失败!");
-			return;
+			std::lock_guard<std::mutex> lock(base.GetQueueMutex());
+			if (vkQueueSubmit(base.GetGraphicsQueue(), 1, &si, _frame_fences[f]))
+			{
+				INVENT_LOG_ERROR("[IVulkanRenderer] 提交失败!");
+				return;
+			}
 		}
 
 		VkSwapchainKHR swapchain = base.GetSwapChain();
@@ -560,7 +563,10 @@ namespace INVENT
 		auto device = base.GetDevice();
 		if (device == VK_NULL_HANDLE) return;
 
-		vkDeviceWaitIdle(device);
+		{
+			std::lock_guard<std::mutex> lock(base.GetQueueMutex());
+			vkDeviceWaitIdle(device);
+		}
 
 		if (_main_opaque_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _main_opaque_pipeline, nullptr); _main_opaque_pipeline = VK_NULL_HANDLE; }
 		if (_compute_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _compute_pipeline, nullptr); _compute_pipeline = VK_NULL_HANDLE; }

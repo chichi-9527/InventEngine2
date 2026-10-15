@@ -444,7 +444,11 @@ namespace INVENT
 			}
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 		}
-		vkDeviceWaitIdle(_device);
+
+		{
+			std::lock_guard<std::mutex> lock(_queue_mutex);
+			vkDeviceWaitIdle(_device);
+		}
 
 		if (!_cleanup_swap_chain() ||
 			!CreateSwapChain() ||
@@ -454,6 +458,7 @@ namespace INVENT
 			return false;
 		}
 
+		INVENT_LOG_INFO(" [IVulkanBase] recreate swap chain.");
 		return true;
 	}
 
@@ -754,6 +759,7 @@ namespace INVENT
 		// 1. 確保設備目前沒有正在執行的異步任務
 		if (_device != VK_NULL_HANDLE)
 		{
+			std::lock_guard<std::mutex> lock(_queue_mutex);
 			vkDeviceWaitIdle(_device);
 		}
 
@@ -1287,8 +1293,11 @@ namespace INVENT
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &command_buffer;
 
-		vkQueueSubmit(_graphics_queue, 1, &submitInfo, VK_NULL_HANDLE);
-		vkQueueWaitIdle(_graphics_queue);
+		{
+			std::lock_guard<std::mutex> lock(_queue_mutex);
+			vkQueueSubmit(_graphics_queue, 1, &submitInfo, VK_NULL_HANDLE);
+			vkQueueWaitIdle(_graphics_queue);
+		}
 
 		vkFreeCommandBuffers(_device, _command_pool, 1, &command_buffer);
 	}

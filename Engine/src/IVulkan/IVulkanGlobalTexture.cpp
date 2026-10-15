@@ -1286,10 +1286,12 @@ namespace INVENT
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &cmd;
 
-		// 注意：如果您使用的是完全獨立的背景執行緒，請在此處對該 Queue 加鎖
 		VkQueue queue = _transfer_queue;
-		vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-		vkQueueWaitIdle(queue);
+		{
+			std::lock_guard<std::mutex> lock(IVulkanBase::Base().GetQueueMutex());
+			vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+			vkQueueWaitIdle(queue);
+		}
 
 		vkFreeCommandBuffers(IVulkanBase::Base().GetDevice(), _transfer_command_pool, 1, &cmd);
 	}
