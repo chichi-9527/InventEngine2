@@ -36,6 +36,7 @@ namespace INVENT
 		static bool _init_pipelines();		// 测试图形管线 + 反馈计算管线
 		static bool _init_test_resources();	// 全局采样器 + set1 + 测试纹理
 		static void _record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present);
+		static void _record_depth_barrier(VkCommandBuffer cmd, VkImage depth_image);
 		static void _write_buffer_binding(VkDescriptorSet set, std::uint32_t binding, VkBuffer buffer, bool is_ubo);
 		static bool _recreate_swapchain();
 		static void _clear();

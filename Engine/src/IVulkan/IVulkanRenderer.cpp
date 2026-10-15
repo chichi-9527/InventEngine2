@@ -11,6 +11,21 @@
 
 #include <cstring>
 
+namespace IVulkan
+{
+	struct UBO
+	{
+		glm::mat4 VP{ 1.0f };
+	};
+
+	struct PointLight
+	{
+		
+
+	};
+
+}
+
 namespace INVENT
 {
 	constexpr const char* TestQuadVSPath = "Config/Shaders/SPV/TestQuad.slang.vert.spv";
@@ -197,13 +212,13 @@ namespace INVENT
 			return false;
 		}
 
-		// 测试图形管线: 手动顶点拉取(顶点硬编码在 VS), 无深度, 不剔除
+		// 测试图形管线: 手动顶点拉取(顶点硬编码在 VS)
 		IVulkanBase::GraphicsPipelineConfig cfg{};
 		cfg.VertexShader = vs;
 		cfg.FragmentShader = fs;
 		cfg.ColorAttachmentFormat = base.GetSwapChainImageFormat();	// 不要硬编码! 实际是 B8G8R8A8_SRGB
-		cfg.DepthAttachmentFormat = VK_FORMAT_UNDEFINED;
-		cfg.EnableDepthTest = VK_FALSE;
+		cfg.DepthAttachmentFormat = base.GetDepthFormat();
+		cfg.EnableDepthTest = VK_TRUE;
 		cfg.CullMode = VK_CULL_MODE_NONE;
 		_main_opaque_pipeline = base.CreateGraphicsPipeline(cfg);
 		if (_main_opaque_pipeline == VK_NULL_HANDLE) return false;
@@ -348,6 +363,9 @@ namespace INVENT
 		// 2) 交换链: UNDEFINED -> COLOR_ATTACHMENT (srcStage 与提交时的 acquire 等待阶段对齐)
 		_record_swapchain_barrier(cmd, swapImage, false);
 
+		// 深度缓冲: UNDEFINED -> DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+		_record_depth_barrier(cmd, base.GetDepthImage());
+
 		// 脏材质上传 + 读屏障
 		IVulkanGlobalMaterial::Instance().FlushDirtyMaterials(cmd, frameindex);
 
@@ -382,12 +400,21 @@ namespace INVENT
 		color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		color.clearValue = _vk_clear;
 
+		VkRenderingAttachmentInfo depth{};
+		depth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+		depth.imageView = base.GetDepthImageView();
+		depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // 清除深度缓冲区
+		depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // 绘制完如果不需要采样，可以用 DONT_CARE 优化性能
+		depth.clearValue.depthStencil = { 1.0f, 0 };	  // 默认深度设为 1.0
+
 		VkRenderingInfo ri{};
 		ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
 		ri.renderArea = { {0, 0}, extent };
 		ri.layerCount = 1;
 		ri.colorAttachmentCount = 1;
 		ri.pColorAttachments = &color;
+		ri.pDepthAttachment = &depth;
 
 		vkCmdBeginRendering(cmd, &ri);
 		vkCmdDraw(cmd, 6, 1, 0, 0);		// 手动顶点拉取: 6 顶点 = quad
@@ -485,6 +512,35 @@ namespace INVENT
 		di.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 		di.imageMemoryBarrierCount = 1;
 		di.pImageMemoryBarriers = &b;
+		vkCmdPipelineBarrier2(cmd, &di);
+	}
+
+	void IVulkanRenderer::_record_depth_barrier(VkCommandBuffer cmd, VkImage depth_image)
+	{
+		VkImageMemoryBarrier2 b{};
+		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		b.image = depth_image;
+		// 注意：深度 Image 的 aspectMask 必須是 DEPTH_BIT
+		b.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+		b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		b.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		// 來源階段：因為 oldLayout 是 UNDEFINED，不需要等待先前的特定操作
+		b.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+		b.srcAccessMask = 0;
+
+		// 目的階段：對齊圖形管線的「早期深度測試」階段，並開啟讀寫權限
+		b.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+		b.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		VkDependencyInfo di{};
+		di.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		di.imageMemoryBarrierCount = 1;
+		di.pImageMemoryBarriers = &b;
+
 		vkCmdPipelineBarrier2(cmd, &di);
 	}
 

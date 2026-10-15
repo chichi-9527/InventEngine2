@@ -71,6 +71,7 @@ namespace INVENT
 			!IVulkanBase::Base().CreateSwapChainImageView() ||
 			!IVulkanBase::Base().CreateVmaAllocator() ||
 			!IVulkanBase::Base().FindDepthFormat() ||
+			!IVulkanBase::Base().CreateDepthImageView() ||
 			!IVulkanBase::Base().InitializeAllOffscreenPasses() ||
 			!IVulkanBase::Base().InitDescriptorCounts() ||
 			!IVulkanBase::Base().CreateGlobalPipelineLayout() ||

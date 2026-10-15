@@ -68,6 +68,7 @@ namespace INVENT
 		bool CreateSwapChain();
 		bool CreateSwapChainImageView();
 		bool RecreateSwapChain();
+		bool CreateDepthImageView();
 		bool CreateVmaAllocator();
 		bool FindDepthFormat();
 		bool InitializeAllOffscreenPasses();
@@ -191,6 +192,8 @@ namespace INVENT
 		VkSwapchainKHR GetSwapChain() const { return _swap_chain; }
 		const std::vector<VkImage>& GetSwapChainImages() const { return _swap_chain_images; }
 		const std::vector<VkImageView>& GetSwapChainImageViews() const { return _swap_chain_image_views; }
+		VkImage GetDepthImage() const { return _depth_image; }
+		VkImageView GetDepthImageView() const { return _depth_image_view; }
 		VkExtent2D GetSwapChainExtent() const { return _swap_chain_extent; }
 		VkDescriptorSet GetGlobalBindlessDescriptorSet() const { return _global_bindless_descriptor_set; }
 		const VkPhysicalDeviceProperties& GetPhysicalDeviceProperties() const { return _physical_device_properties; }
@@ -242,6 +245,8 @@ namespace INVENT
 
 		std::vector<VkImage> _swap_chain_images;
 		std::vector<VkImageView> _swap_chain_image_views;
+		VkImage _depth_image = VK_NULL_HANDLE;
+		VkImageView _depth_image_view = VK_NULL_HANDLE;
 
 		SwapChainSupportDetails _swap_chain_support{};
 		QueueFamilyIndices _queue_family_indices{};

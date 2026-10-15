@@ -448,8 +448,39 @@ namespace INVENT
 
 		if (!_cleanup_swap_chain() ||
 			!CreateSwapChain() ||
-			!CreateSwapChainImageView())
+			!CreateSwapChainImageView() ||
+			!CreateDepthImageView())
 		{
+			return false;
+		}
+
+		return true;
+	}
+
+	bool IVulkanBase::CreateDepthImageView()
+	{
+		if (_depth_format == VK_FORMAT_UNDEFINED)
+		{
+			return false;
+		}
+
+		if (VkResult res = UseVmaCreateImage(_swap_chain_extent.width,
+			_swap_chain_extent.height,
+			1,
+			_depth_format,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+			0,
+			_depth_image))
+		{
+			INVENT_LOG_ERROR(std::format(" [IVulkanBase] create depth image error! result: {}.", static_cast<int>(res)));
+			return false;
+		}
+
+		_depth_image_view = CreateImageView(_depth_image, _depth_format, VK_IMAGE_ASPECT_DEPTH_BIT);
+		if (_depth_image_view == nullptr)
+		{
+			INVENT_LOG_ERROR(" [IVulkanBase] create depth image view error!");
 			return false;
 		}
 
@@ -740,6 +771,17 @@ namespace INVENT
 
 		// 3. 銷毀 Swapchain 相關資源（Image Views）
 		// 註：Swapchain 的 VkImage 是由 Swapchain 管理的，不需要手動 vkDestroyImage
+		// depth image & depth image view
+		if (_depth_image_view != VK_NULL_HANDLE)
+		{
+			vkDestroyImageView(_device, _depth_image_view, nullptr);
+			_depth_image_view = VK_NULL_HANDLE;
+		}
+		if (_depth_image != VK_NULL_HANDLE)
+		{
+			UseVmaDestroyImage(_depth_image);
+			_depth_image = VK_NULL_HANDLE;
+		}
 		for (auto imageView : _swap_chain_image_views)
 		{
 			if (imageView != VK_NULL_HANDLE)
@@ -1860,6 +1902,17 @@ namespace INVENT
 
 	bool IVulkanBase::_cleanup_swap_chain()
 	{
+		if (_depth_image_view != VK_NULL_HANDLE)
+		{
+			vkDestroyImageView(_device, _depth_image_view, nullptr);
+			_depth_image_view = VK_NULL_HANDLE;
+		}
+		if (_depth_image != VK_NULL_HANDLE)
+		{
+			UseVmaDestroyImage(_depth_image);
+			_depth_image = VK_NULL_HANDLE;
+		}
+
 		for (auto& imageView : _swap_chain_image_views)
 		{
 			vkDestroyImageView(_device, imageView, nullptr);
