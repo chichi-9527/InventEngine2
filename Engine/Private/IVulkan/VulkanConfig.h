@@ -44,18 +44,8 @@ namespace IVulkan
 	// 单个 UBO 描述符绑定的最大字节数
 	inline std::uint32_t MaxUBORange{ 0 };
 
-	struct UBO 
-	{
-		glm::mat4 VP{ 1.0f };
-	};
-
-	struct PointLight
-	{
-		VkDrawIndexedIndirectCommand command{};
-		
-	};
-
-	struct PushConstants 
+	// IVulkanBase 中也有使用
+	struct PushConstants
 	{
 		std::uint32_t DrawObjectIndexOffset{ 0 };
 	};
