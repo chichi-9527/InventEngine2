@@ -12,17 +12,17 @@
 namespace INVENT
 {
 
-	enum IMaterialTextureReadyFlags : std::uint16_t
+	enum IMaterialTextureHasFlag : std::uint16_t
 	{
-		ReadyBitAllNotReady = 0,
-		ReadyBitDeffuse = 1 << 0,
-		ReadyBitNormal = 1 << 1,
-		ReadyBitSpecular = 1 << 2,
-		ReadyBitEmission = 1 << 3,
-		ReadyBitAo = 1 << 4,
-		ReadyBitOpacity = 1 << 5,
-		ReadyBitRoughness = 1 << 6,
-		ReadyBitClearCoat = 1 << 7
+		HasBitAllNotHas = 0,
+		HasBitDeffuse = 1 << 0,
+		HasBitNormal = 1 << 1,
+		HasBitSpecular = 1 << 2,
+		HasBitEmission = 1 << 3,
+		HasBitAo = 1 << 4,
+		HasBitOpacity = 1 << 5,
+		HasBitRoughness = 1 << 6,
+		HasBitClearCoat = 1 << 7
 	};
 	enum IMaterialAttributeFlag : std::uint16_t
 	{
@@ -36,7 +36,7 @@ namespace INVENT
 		// 材质属性 IMaterialAttributeFlag
 		std::uint16_t MaterialAttribute = IMaterialAttributeFlag::UnDefined;
 		// 贴图标记（是否准备好）
-		std::uint16_t textureReadyFlags = IMaterialTextureReadyFlags::ReadyBitAllNotReady;
+		std::uint16_t textureReadyFlags = IMaterialTextureHasFlag::HasBitAllNotHas;
 
 		// 
 		std::uint16_t DiffuseTextureId{ 0 };

@@ -26,7 +26,7 @@ namespace INVENT
 	class InstanceBuffer
 	{
 	public:
-		enum InstanceOptionFlag : std::uint32_t {
+		enum InstanceOptionFlag : std::uint16_t {
 			NoUse = 0,
 			UseUV = 1 << 0,
 			ShowInstance = 1 << 1,

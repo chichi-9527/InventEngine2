@@ -48,6 +48,7 @@ namespace IVulkan
 	struct PushConstants
 	{
 		std::uint32_t DrawObjectIndexOffset{ 0 };
+		std::uint16_t LevelID{ 0xFFFF };
 	};
 
 	/*typedef struct VkDrawIndexedIndirectCommand {
