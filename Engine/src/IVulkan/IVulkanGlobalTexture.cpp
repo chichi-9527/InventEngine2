@@ -49,7 +49,7 @@ namespace INVENT
 		_bit_vector_valid.ResizeBitCount(textureCount);
 
 		_init_other();
-		_init_default_image();
+		
 		//if (!ITieredImageMemoryManager::Init()) return false;
 		if (!TexMemManager::Init()) return false;
 
@@ -72,6 +72,8 @@ namespace INVENT
 			INVENT_LOG_INFO("[IVulkanTexture2DManagement] 纹理流式加载已启用.");
 
 		_upload_pool->Start();
+
+		_init_default_image();
 
 		_is_valid = true;
 		return true;
@@ -1273,6 +1275,25 @@ namespace INVENT
 		return cmd;
 	}
 
+	void IVulkanTexture2DManagement::_end_transfer_command(VkCommandBuffer cmd)
+	{
+		if (cmd == VK_NULL_HANDLE) return;
+
+		vkEndCommandBuffer(cmd);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &cmd;
+
+		// 注意：如果您使用的是完全獨立的背景執行緒，請在此處對該 Queue 加鎖
+		VkQueue queue = _transfer_queue;
+		vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(queue);
+
+		vkFreeCommandBuffers(IVulkanBase::Base().GetDevice(), _transfer_command_pool, 1, &cmd);
+	}
+
 	void IVulkanTexture2DManagement::_record_release_barrier(VkCommandBuffer cmd, VkImage image)
 	{
 		// 同一队列族时 QFI 填 IGNORED, barrier 自动退化为普通屏障
@@ -1468,9 +1489,10 @@ namespace INVENT
 		uint32_t blackPixel = 0xFF000000;
 		uint32_t normalPixel = 0xFFFF8080;
 		uint32_t ormPixel = 0xFF0080FF;
-		uint8_t r128Pixel = 0x80;
+		uint8_t  r128Pixel = 0x80;
 
-		constexpr VkDeviceSize stagingBufferSize = sizeof(uint32_t) * 4 + sizeof(uint8_t) * 3;
+		// 計算 Staging 緩衝區所需的精確大小
+		constexpr VkDeviceSize stagingBufferSize = (sizeof(uint32_t) * 4) + sizeof(uint8_t);
 
 		VkBuffer stagingBuffer;
 		void* data;
@@ -1483,214 +1505,93 @@ namespace INVENT
 			throw std::runtime_error("failed to load staging buffer! : _init_default_image");
 		}
 
-		uint32_t pixels[] = { whitePixel,blackPixel,normalPixel,ormPixel };
-		uint8_t pixels2[] = { r128Pixel };
+		// 寫入像素資料到暫存記憶體
+		uint32_t pixels[] = { whitePixel, blackPixel, normalPixel, ormPixel };
 		memcpy(data, pixels, sizeof(uint32_t) * 4);
-		memcpy(reinterpret_cast<std::byte*>(data) + (sizeof(uint32_t) * 4), pixels2, sizeof(uint8_t));
+		memcpy(reinterpret_cast<std::byte*>(data) + (sizeof(uint32_t) * 4), &r128Pixel, sizeof(uint8_t));
 
 		if (!IVulkanBase::Base().UseVmaFlushAllocationBuffer(stagingBuffer))
 		{
 			throw std::runtime_error("failed to flush buffer allocation!");
 		}
 
+		auto& base = IVulkanBase::Base();
 		VkDeviceSize offset{ 0 };
-		// white
+
+		// ----------------------------------------------------
+		// 1) White (SRGB & UNORM) - 共享相同的緩衝區資料
+		// ----------------------------------------------------
 		VkImage whiteImageSRGB;
-		IVulkanBase::Base().UseVmaCreateImage(1,
-			1,
-			1,
-			VK_FORMAT_R8G8B8A8_SRGB,
-			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			0,
-			whiteImageSRGB);
-		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			whiteImageSRGB,
-			VK_FORMAT_R8G8B8A8_SRGB,
-			1,
-			1,
-			1,
-			offset);
-		VkImageView whiteImageViewSRGB = IVulkanBase::Base().CreateImageView(whiteImageSRGB,
-			VK_FORMAT_R8G8B8A8_SRGB,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_VIEW_TYPE_2D,
-			1);
-		if (whiteImageViewSRGB == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("failed to create texture image view! white pixel");
-		}
-		_default_textures[DefaultTextureType::S_White] = { whiteImageSRGB,whiteImageViewSRGB,0 };
+		base.UseVmaCreateImage(1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, whiteImageSRGB);
+		_upload_default_1x1_image(stagingBuffer, whiteImageSRGB, offset, false);
+		VkImageView whiteImageViewSRGB = base.CreateImageView(whiteImageSRGB, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1);
+		_default_textures[DefaultTextureType::S_White] = { whiteImageSRGB, whiteImageViewSRGB, 0 };
+
 		VkImage whiteImageUNORM;
-		IVulkanBase::Base().UseVmaCreateImage(1,
-			1,
-			1,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			0,
-			whiteImageUNORM);
-		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			whiteImageUNORM,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			1,
-			1,
-			1,
-			offset);
-		VkImageView whiteImageViewUNORM = IVulkanBase::Base().CreateImageView(whiteImageUNORM,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_VIEW_TYPE_2D,
-			1);
-		if (whiteImageViewUNORM == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("failed to create texture image view! white pixel");
-		}
-		_default_textures[DefaultTextureType::U_White] = { whiteImageUNORM,whiteImageViewUNORM,0 };
-		offset += sizeof(uint32_t);
+		base.UseVmaCreateImage(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, whiteImageUNORM);
+		_upload_default_1x1_image(stagingBuffer, whiteImageUNORM, offset, false);
+		VkImageView whiteImageViewUNORM = base.CreateImageView(whiteImageUNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1);
+		_default_textures[DefaultTextureType::U_White] = { whiteImageUNORM, whiteImageViewUNORM, 0 };
 
-		// black
+		offset += sizeof(uint32_t); // 前進到黑像素
+
+		// ----------------------------------------------------
+		// 2) Black (SRGB & UNORM) - 共享相同的緩衝區資料
+		// ----------------------------------------------------
 		VkImage blackImageSRGB;
-		IVulkanBase::Base().UseVmaCreateImage(1,
-			1,
-			1,
-			VK_FORMAT_R8G8B8A8_SRGB,
-			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			0,
-			blackImageSRGB);
-		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			blackImageSRGB,
-			VK_FORMAT_R8G8B8A8_SRGB,
-			1,
-			1,
-			1,
-			offset);
-		VkImageView blackImageViewSRGB = IVulkanBase::Base().CreateImageView(blackImageSRGB,
-			VK_FORMAT_R8G8B8A8_SRGB,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_VIEW_TYPE_2D,
-			1);
-		if (blackImageViewSRGB == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("failed to create texture image view! white pixel");
-		}
-		_default_textures[DefaultTextureType::S_Black] = { blackImageSRGB,blackImageViewSRGB,0 };
+		base.UseVmaCreateImage(1, 1, 1, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, blackImageSRGB);
+		_upload_default_1x1_image(stagingBuffer, blackImageSRGB, offset, false);
+		VkImageView blackImageViewSRGB = base.CreateImageView(blackImageSRGB, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1);
+		_default_textures[DefaultTextureType::S_Black] = { blackImageSRGB, blackImageViewSRGB, 0 };
+
 		VkImage blackImageUNORM;
-		IVulkanBase::Base().UseVmaCreateImage(1,
-			1,
-			1,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			0,
-			blackImageUNORM);
-		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			blackImageUNORM,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			1,
-			1,
-			1,
-			offset);
-		VkImageView blackImageViewUNORM = IVulkanBase::Base().CreateImageView(blackImageUNORM,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_VIEW_TYPE_2D,
-			1);
-		if (blackImageViewUNORM == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("failed to create texture image view! white pixel");
-		}
-		_default_textures[DefaultTextureType::U_Black] = { blackImageUNORM,blackImageViewUNORM,0 };
-		offset += sizeof(uint32_t);
+		base.UseVmaCreateImage(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, blackImageUNORM);
+		_upload_default_1x1_image(stagingBuffer, blackImageUNORM, offset, false);
+		VkImageView blackImageViewUNORM = base.CreateImageView(blackImageUNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1);
+		_default_textures[DefaultTextureType::U_Black] = { blackImageUNORM, blackImageViewUNORM, 0 };
 
-		// normal
+		offset += sizeof(uint32_t); // 前進到法線像素
+
+		// ----------------------------------------------------
+		// 3) Normal Blue
+		// ----------------------------------------------------
 		VkImage normalImage;
-		IVulkanBase::Base().UseVmaCreateImage(1,
-			1,
-			1,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			0,
-			normalImage);
-		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			normalImage,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			1,
-			1,
-			1,
-			offset);
-		VkImageView normalImageView = IVulkanBase::Base().CreateImageView(normalImage,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_VIEW_TYPE_2D,
-			1);
-		if (normalImageView == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("failed to create texture image view! white pixel");
-		}
-		_default_textures[DefaultTextureType::NormalBlue] = { normalImage,normalImageView,0 };
-		offset += sizeof(uint32_t);
+		base.UseVmaCreateImage(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, normalImage);
+		_upload_default_1x1_image(stagingBuffer, normalImage, offset, false);
+		VkImageView normalImageView = base.CreateImageView(normalImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1);
+		_default_textures[DefaultTextureType::NormalBlue] = { normalImage, normalImageView, 0 };
 
-		// ORM
+		offset += sizeof(uint32_t); // 前進到 ORM 像素
+
+		// ----------------------------------------------------
+		// 4) ORM (Occlusion, Roughness, Metallic)
+		// ----------------------------------------------------
 		VkImage ORMImage;
-		IVulkanBase::Base().UseVmaCreateImage(1,
-			1,
-			1,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			0,
-			ORMImage);
-		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			ORMImage,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			1,
-			1,
-			1,
-			offset);
-		VkImageView ORMImageView = IVulkanBase::Base().CreateImageView(ORMImage,
-			VK_FORMAT_R8G8B8A8_UNORM,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_VIEW_TYPE_2D,
-			1);
-		if (ORMImageView == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("failed to create texture image view! white pixel");
-		}
-		_default_textures[DefaultTextureType::ORM] = { ORMImage,ORMImageView,0 };
-		offset += sizeof(uint32_t);
+		base.UseVmaCreateImage(1, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, ORMImage);
+		_upload_default_1x1_image(stagingBuffer, ORMImage, offset, false);
+		VkImageView ORMImageView = base.CreateImageView(ORMImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1);
+		_default_textures[DefaultTextureType::ORM] = { ORMImage, ORMImageView, 0 };
 
-		// u8
+		offset += sizeof(uint32_t); // 前進到 R128 單通道像素
+
+		// ----------------------------------------------------
+		// 5) U8 單通道灰階圖 (R128)
+		// ----------------------------------------------------
 		VkImage R128Image;
-		IVulkanBase::Base().UseVmaCreateImage(1,
-			1,
-			1,
-			VK_FORMAT_R8_UNORM,
-			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-			0,
-			R128Image);
-		_upload_texture_and_generate_mipmaps(stagingBuffer,
-			R128Image,
-			VK_FORMAT_R8_UNORM,
-			1,
-			1,
-			1,
-			offset);
-		VkImageView R128ImageView = IVulkanBase::Base().CreateImageView(R128Image,
-			VK_FORMAT_R8_UNORM,
-			VK_IMAGE_ASPECT_COLOR_BIT,
-			VK_IMAGE_VIEW_TYPE_2D,
-			1);
-		if (R128ImageView == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("failed to create texture image view! white pixel");
-		}
-		_default_textures[DefaultTextureType::U8_128] = { R128Image,R128ImageView,0 };
+		base.UseVmaCreateImage(1, 1, 1, VK_FORMAT_R8_UNORM, VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, R128Image);
+		_upload_default_1x1_image(stagingBuffer, R128Image, offset, true);
+		VkImageView R128ImageView = base.CreateImageView(R128Image, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_2D, 1);
+		_default_textures[DefaultTextureType::U8_128] = { R128Image, R128ImageView, 0 };
 
-		IVulkanBase::Base().UseVmaDestroyBuffer(stagingBuffer);
+		// 銷毀暫存緩衝
+		base.UseVmaDestroyBuffer(stagingBuffer);
 	}
 
 	void IVulkanTexture2DManagement::_init_other()
@@ -1744,6 +1645,59 @@ namespace INVENT
 		}
 
 		_resize_mip_feedback(static_cast<std::uint32_t>(textureCount));
+	}
+
+	void IVulkanTexture2DManagement::_upload_default_1x1_image(VkBuffer staging_buffer, VkImage tex_image, VkDeviceSize buffer_offset, bool is_r8_only)
+	{
+		VkCommandBuffer cmd = _begin_transfer_command();
+		if (cmd == VK_NULL_HANDLE) return;
+
+		// 1) 轉換佈局：UNDEFINED -> TRANSFER_DST_OPTIMAL
+		_transition_image_layout(cmd, tex_image, VK_FORMAT_UNDEFINED,
+			VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1);
+
+		// 2) 錄製複製指令 (1x1 像素)
+		VkBufferImageCopy region{};
+		region.bufferOffset = buffer_offset;
+		region.bufferRowLength = 0;
+		region.bufferImageHeight = 0;
+		region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		region.imageSubresource.mipLevel = 0;
+		region.imageSubresource.baseArrayLayer = 0;
+		region.imageSubresource.layerCount = 1;
+		region.imageOffset = { 0, 0, 0 };
+		region.imageExtent = { 1, 1, 1 }; // 1x1 尺寸
+
+		vkCmdCopyBufferToImage(cmd, staging_buffer, tex_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+		// 3) 轉換佈局：TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+		VkImageMemoryBarrier2 barrier2{};
+		barrier2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		barrier2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		barrier2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 目標佈局不變
+		barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier2.image = tex_image;
+		barrier2.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+		// 來源階段：剛剛完成的傳輸寫入
+		barrier2.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+		barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+
+		// 核心修正：目的階段只能是 TRANSFER，存取設為 0
+		// 這是 Vulkan 規範中將資源交接給另一個佇列（或稍後釋放同步）的標準安全做法
+		barrier2.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+		barrier2.dstAccessMask = VK_ACCESS_2_NONE;
+
+		VkDependencyInfo depInfo{};
+		depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		depInfo.imageMemoryBarrierCount = 1;
+		depInfo.pImageMemoryBarriers = &barrier2;
+
+		vkCmdPipelineBarrier2(cmd, &depInfo);
+
+		// 4) 結束錄製並提交至傳輸佇列
+		_end_transfer_command(cmd);
 	}
 
 	void IVulkanTexture2DManagement::_transition_image_layout(VkCommandBuffer commond_buffer, VkImage image, VkFormat format, VkImageLayout old_layout, VkImageLayout new_layout, uint32_t base_mip_level, uint32_t level_count)

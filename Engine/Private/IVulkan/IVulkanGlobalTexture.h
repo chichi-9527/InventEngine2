@@ -305,6 +305,11 @@ namespace INVENT
 		void _insert_name_cache(const std::string& name, Texture2DHandle handle);
 		void _remove_name_cache_by_handle(const Texture2DHandle& handle);
 		void _update_texture_count();
+		void _upload_default_1x1_image(
+			VkBuffer staging_buffer,
+			VkImage tex_image,
+			VkDeviceSize buffer_offset,
+			bool is_r8_only);
 		void _transition_image_layout(VkCommandBuffer commond_buffer,
 			VkImage image,
 			VkFormat format,
@@ -339,6 +344,7 @@ namespace INVENT
 		void _kick_upload_task();						// 投递上传任务到工作线程池
 		void _upload_task_func();						// 上传任务体 (线程池线程执行)
 		VkCommandBuffer _begin_transfer_command();
+		void _end_transfer_command(VkCommandBuffer cmd);
 		void _record_release_barrier(VkCommandBuffer cmd, VkImage image);	// 传输队列 -> 图形队列 所有权释放
 		void _stop_upload();
 		void _evict_texture(std::uint32_t slot);
