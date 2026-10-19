@@ -105,6 +105,21 @@ namespace INVENT
 			return false;
 		}
 
+		// binding3
+		VkDeviceSize binding3Size = sizeof(std::uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT +
+			sizeof(VkDrawIndexedIndirectCommand) * IVulkan::EXPECTED_INSTANCE_SIZE;
+		VkBufferUsageFlags binding3UsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+		// 在渲染前需要用 vkCmdFillBuffer 將其清零加上 TRANSFER_DST 標記
+		binding3UsageFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		if (VkResult r = base.UseVmaCreateBuffer(binding3Size,
+			binding3UsageFlags,
+			0,
+			_draw_count_and_indirect_buffer, nullptr))
+		{
+			INVENT_LOG_ERROR("[IVulkanRenderer] VkDrawIndexedIndirectCommand ssbo 创建失败!");
+			return false;
+		}
+
 		// 未使用 binding 的占位 ssbo
 		if (VkResult r = base.UseVmaCreateBuffer(16,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -134,7 +149,7 @@ namespace INVENT
 			_write_buffer_binding(_set0[i], 0, _ubo_buffers[i], true);		// ubo (identity VP)
 			_write_buffer_binding(_set0[i], 1, _dummy_ssbo, false);		// 灯光 (占位)
 			_write_buffer_binding(_set0[i], 2, _test_instance_buffer, false);	// 实例 (测试)
-			_write_buffer_binding(_set0[i], 3, _dummy_ssbo, false);		// 间接命令 (占位)
+			_write_buffer_binding(_set0[i], 3, _draw_count_and_indirect_buffer, false);		// 间接命令
 			// binding 4: 每帧 BindMipFeedback 写
 		}
 		return true;
@@ -370,6 +385,7 @@ namespace INVENT
 		IVulkanGlobalMaterial::Instance().FlushDirtyMaterials(cmd, frameindex);
 
 		// 3) mip 反馈 CS (裁剪 CS 的测试替身)
+		vkCmdFillBuffer(cmd, _draw_count_and_indirect_buffer, 0, sizeof(uint32_t), 0);	// 将shader中渲染原子计数器置0
 		texMgmt.ResetMipFeedback(cmd, frameindex);		// fill 0xFF + transfer->compute 屏障
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
 			base.GetVkPipelineLayout(), 0, 1, &_set0[frameindex], 0, nullptr);
@@ -574,6 +590,7 @@ namespace INVENT
 
 		if (_test_instance_buffer != VK_NULL_HANDLE) { base.UseVmaDestroyBuffer(_test_instance_buffer); _test_instance_buffer = VK_NULL_HANDLE; }
 		if (_dummy_ssbo != VK_NULL_HANDLE) { base.UseVmaDestroyBuffer(_dummy_ssbo); _dummy_ssbo = VK_NULL_HANDLE; }
+		if (_draw_count_and_indirect_buffer != VK_NULL_HANDLE) { base.UseVmaDestroyBuffer(_draw_count_and_indirect_buffer); _draw_count_and_indirect_buffer = VK_NULL_HANDLE; }
 		for (auto b : _ubo_buffers)
 			if (b != VK_NULL_HANDLE) base.UseVmaDestroyBuffer(b);
 		_ubo_buffers.clear();

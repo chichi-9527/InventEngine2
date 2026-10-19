@@ -62,6 +62,8 @@ namespace INVENT
 		inline static void* _test_instance_mapped = nullptr;
 		// 未使用 binding (1灯光/3间接命令) 的占位, 防未更新告警
 		inline static VkBuffer _dummy_ssbo = VK_NULL_HANDLE;
+		// binding 3 间接命令 (含每个批次的 drawCount)
+		inline static VkBuffer _draw_count_and_indirect_buffer = VK_NULL_HANDLE;
 
 		inline static VkClearValue _vk_clear{};
 
