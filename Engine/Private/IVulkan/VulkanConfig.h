@@ -19,6 +19,7 @@ namespace IVulkan
 	constexpr std::uint32_t DEF_BINDLESS_TEXTURES = 10000U;		// 默认纹理数量 10,000
 	constexpr std::uint32_t MAX_ALLOCATED_SETS = MAX_FRAMES_IN_FLIGHT;
 	constexpr std::uint32_t EXPECTED_INSTANCE_SIZE = 1ull * 1024 * 1024; // 预期的实例数量 1M (个) 
+	constexpr std::uint32_t MAX_INSTANCE_BATCH_COUNT = 32u;  // 最大实例批次数量 32（批）
 	constexpr std::uint32_t EXPECTED_UBO_SIZE = 128U;				// 预期的ubo大小 128 (B)
 	constexpr std::uint32_t MAX_POINT_LIGHT_COUNT = 100U;
 	constexpr std::uint32_t DEF_ONE_BUFFER_SIZE = 32ull * 1024 * 1024; // 默认管理类中单个 VkBuffer 大小  32 (MB)
@@ -48,7 +49,8 @@ namespace IVulkan
 	struct PushConstants
 	{
 		std::uint32_t DrawObjectIndexOffset{ 0 };
-		std::uint16_t LevelID{ 0xFFFF };
+		std::uint32_t LevelID{ 0xFFFF };
+		std::uint32_t BatchID{ 0 };
 	};
 
 	/*typedef struct VkDrawIndexedIndirectCommand {

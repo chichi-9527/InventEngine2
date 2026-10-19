@@ -16,7 +16,16 @@ namespace INVENT
 
 	bool InstanceBuffer::Init(const std::vector<uint32_t>& other_batches)
 	{
-		InstanceBuffer::Destroy();
+		if (_is_valid) return false;
+
+		if (other_batches.size() >= static_cast<size_t>(IVulkan::MAX_INSTANCE_BATCH_COUNT))
+		{
+			INVENT_LOG_ERROR(std::format("[InstanceBuffer] batch count(includes default) greater than MAX_INSTANCE_BATCH_COUNT: {}.", IVulkan::MAX_INSTANCE_BATCH_COUNT));
+			INVENT_LOG_WARNING("[InstanceBuffer] if you want to increase IVulkan::MAX_INSTANCE_BATCH_COUNT,"
+				"you must to change shader file drawCount count and IVulkanRanderer::_draw_count_and_indirect_buffer size.");
+			return false;
+		}
+
 		Allocator = IMemPoolAllocatorOnlyFixedBlock<IVulkan::Batch>{ IEngineTools::Instance().GetMemPoolPool() };
 		// calculate buffer size
 		std::uint32_t maxInstanceNum = static_cast<uint32_t>(uint64_t{ IVulkan::MaxSSBORange } / sizeof(InstanceData));
@@ -72,6 +81,7 @@ namespace INVENT
 		defaultBatch->Count = _current_instance_num - allOthers;
 		defaultBatch->_valids.ResizeBitCount(_current_instance_num - allOthers);
 
+		_is_valid = true;
 		return true;
 	}
 
@@ -92,6 +102,7 @@ namespace INVENT
 		}
 		_mapped_data = nullptr;
 		_current_instance_num = 0;
+		_is_valid = false;
 	}
 
 	uint32_t InstanceBuffer::GetOffset(size_t batch_index)
