@@ -34,13 +34,14 @@ namespace INVENT
 		};
 		struct alignas(16) InstanceData
 		{
-			glm::mat4 Model{ 1.0f };
+			glm::mat4 Model{ 1.0f };				// 已乘入 Center 偏移
 			VkDeviceAddress VertexAddress{ 0 };		// 顶点起始指针
 			VkDeviceAddress MaterialAddress{ 0 };	// 材质起始指针
 			VkDeviceAddress IndexAddress{ 0 };		// 顶点索引起始指针
 			VkDeviceAddress BoneBufferAddress{ 0 };	// 骨骼起始指针
 			glm::vec4 UV{ 0.0f,0.0f,1.0f,1.0f };
 			glm::vec4 Color{ 1.0f };
+			glm::vec4 AABBExtent{ 1.0f };			// [xyz] 為半邊長，[w] 可預留給包圍球半徑
 			std::uint32_t IndexCount{ 0 };
 			std::uint32_t BoneCount{ 0 };
 			std::uint32_t ObjectID{ 0 };			// 为0时视为无效，计算着色器使用
@@ -48,14 +49,15 @@ namespace INVENT
 			std::uint16_t LevelID{ 0xFFFF };
 		};
 		static_assert(alignof(InstanceData) == 16);
-		static_assert(sizeof(InstanceData) == 144);
+		static_assert(sizeof(InstanceData) == 160);
 		static_assert(offsetof(InstanceData, Model) == 0);
 		static_assert(offsetof(InstanceData, VertexAddress) == 64);
 		static_assert(offsetof(InstanceData, UV) == 96);
 		static_assert(offsetof(InstanceData, Color) == 112);
-		static_assert(offsetof(InstanceData, IndexCount) == 128);
-		static_assert(offsetof(InstanceData, InstanceOptionFlags) == 140);
-		static_assert(offsetof(InstanceData, LevelID) == 142);
+		static_assert(offsetof(InstanceData, AABBExtent) == 128);
+		static_assert(offsetof(InstanceData, IndexCount) == 144);
+		static_assert(offsetof(InstanceData, InstanceOptionFlags) == 156);
+		static_assert(offsetof(InstanceData, LevelID) == 158);
 
 		struct Handle 
 		{
@@ -90,5 +92,7 @@ namespace INVENT
 		inline static std::vector<IVulkan::Batch*> _batches; // 保存所有批次的偏移
 		inline static void* _mapped_data = nullptr;
 		inline static uint32_t _current_instance_num{ 0 };
+
+		inline static bool _is_valid{ false };
 	};
 }
