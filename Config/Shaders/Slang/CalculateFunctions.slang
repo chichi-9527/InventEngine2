@@ -1,4 +1,5 @@
-﻿
+﻿#pragma once
+
 #include "Common.slang"
 
 CalculatedVertex CalculateVertex(InVertex vertex)

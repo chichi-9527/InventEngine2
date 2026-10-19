@@ -1,4 +1,5 @@
-﻿
+﻿#pragma once
+
 enum VertexOptionalFlag : uint32_t
 {
     HasNone = 0,
@@ -94,12 +95,47 @@ struct InstanceData
     void* boneAddress;  // 骨骼地址 ,暂时不支持
     float4 uv; // 2d 精灵使用的大图 uv
     float4 color; // 颜色
+    float4 AABBExtent; // 实例 AABB box [xyz] 为半径 [w] 预留(包围球半径，目前未使用)
     uint32_t indexCount; // 索引数量
     uint32_t boneCount; // 骨骼数量
     uint32_t objectID; // 实例ID 为0时无效 计算着色器剔除该实例
     uint16_t optionFlags; // 实例选项
     uint16_t levelID;     // 实例所属关卡 ID
 };
+
+struct UBO
+{
+    float4x4 vp; // 视图投影矩阵
+    float4 cameraDatas; // 相机数据 [xyz]: 相机位置 [w]: LOD 系数
+    uint32_t lightCount; // 灯光数量
+};
+
+enum LightType : uint32_t
+{
+    PointLight = 0,
+    SpotLight = 1,
+};
+
+// 使用 ScalarDataLayout 优化内存对齐，float3 不会对齐到 16 字节
+struct PointLight
+{
+    float3 position;
+    float radius;
+    float4 color;
+    float attenuation; // 衰减系数
+    uint32_t lightType; // 灯光类型 LightType
+    float spotExponent; // 聚光灯指数
+    float spotCutoff; // 聚光灯截止角度
+    uint32_t TextureSlot; // 纹理槽位
+};
+
+struct PushConstants
+{
+    uint32_t DrawObjectIndex; // 本次绘制对象索引
+    uint32_t LevelID;         // 实例所属关卡 ID
+    uint32_t BatchID;         // 实例所属批次 ID
+};
+[[vk_push_constant]] PushConstants gPushConstants;
 
 // vulkan 实例绘制命令
 struct VkDrawIndexedIndirectCommand {
