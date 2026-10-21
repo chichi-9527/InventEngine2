@@ -74,8 +74,9 @@ struct Material
     // 透明涂层
     uint16_t ClearCoatTextureId;
 
-    //
-    uint8_t padding[12];
+    uint8_t diffuseTextureWeights[8]; // 当纹理均视为漫反射贴图时，表示8张纹理的权重（0-255）默认值为 0,所有权重之和为 255
+
+    uint8_t padding[4];
 };
 
 enum InstanceOptionFlag : uint16_t 
@@ -103,11 +104,21 @@ struct InstanceData
     uint16_t levelID;     // 实例所属关卡 ID
 };
 
+enum LightFlag : uint32_t
+{
+    UseNone = 0,
+    UseParallelLight = 1 << 0,
+    UsePointLight = 1 << 1
+};
+
 struct UBO
 {
     float4x4 vp; // 视图投影矩阵
     float4 cameraDatas; // 相机数据 [xyz]: 相机位置 [w]: LOD 系数
-    uint32_t lightCount; // 灯光数量
+    float4 parallelLightDatas; // 灯光数据 [xyz]: 平行光方向 [w]: 平行光强度
+    float4 parallelLightColor; // 平行光颜色
+    uint32_t pointLightCount; // 点光源数量
+    uint32_t UseLightFlags; // 是否使用光源 LightFlag
 };
 
 enum LightType : uint32_t
