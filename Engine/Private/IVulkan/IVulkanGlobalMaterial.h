@@ -55,8 +55,10 @@ namespace INVENT
 		// 透明涂层
 		std::uint16_t ClearCoatTextureId{ 0 };
 
-		// 
-		std::uint8_t padding[12];
+		// 当纹理均视为漫反射贴图时，表示8张纹理的权重（0-255）, 所有权重之和为 255
+		std::uint8_t diffuseTextureWeights[8] = { 255,0,0,0,0,0,0,0 };
+
+		std::uint8_t padding[4];
 	};
 	static_assert(sizeof(Material) == 32);
 	// shader 侧 Material 布局必须与此逐字节一致 (BDA 裸指针加载不受 std430 对齐约束, 全靠两侧声明一致)

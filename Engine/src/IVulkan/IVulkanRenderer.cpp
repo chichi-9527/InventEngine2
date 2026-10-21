@@ -13,15 +13,39 @@
 
 namespace IVulkan
 {
+	enum LightFlag : std::uint32_t
+	{
+		UseNone = 0,
+		UseParallelLight = 1 << 0,
+		UsePointLight = 1 << 1,
+	};
+
 	struct UBO
 	{
 		glm::mat4 VP{ 1.0f };
+		glm::vec4  cameraDatas; // 相机数据 [xyz]: 相机位置 [w]: LOD 系数
+		glm::vec4 parallelLightDatas; // 灯光数据 [xyz]: 平行光方向 [w]: 平行光强度
+		glm::vec4 parallelLightColor; // 平行光颜色
+		std::uint32_t lightCount; // 灯光数量
+		std::uint32_t UseLightFlags = LightFlag::UseNone; // 是否使用光源 LightFlag
+	};
+
+	enum LightType : uint32_t
+	{
+		PointLight = 0,
+		SpotLight = 1,
 	};
 
 	struct PointLight
 	{
-		
-
+		glm::vec3 position;
+		float radius;
+		glm::vec4 color;
+		float attenuation; // 衰减系数
+		std::uint32_t lightType; // 灯光类型 LightType
+		float spotExponent; // 聚光灯指数
+		float spotCutoff; // 聚光灯截止角度
+		std::uint32_t TextureSlot; // 纹理槽位
 	};
 
 }
