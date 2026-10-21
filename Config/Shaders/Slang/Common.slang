@@ -121,23 +121,27 @@ struct UBO
     uint32_t UseLightFlags; // 是否使用光源 LightFlag
 };
 
-enum LightType : uint32_t
-{
-    PointLight = 0,
-    SpotLight = 1,
-};
-
 // 使用 ScalarDataLayout 优化内存对齐，float3 不会对齐到 16 字节
 struct PointLight
 {
     float3 position;
     float radius;
     float4 color;
-    float attenuation; // 衰减系数
-    uint32_t lightType; // 灯光类型 LightType
-    float spotExponent; // 聚光灯指数
-    float spotCutoff; // 聚光灯截止角度
-    uint32_t TextureSlot; // 纹理槽位
+    float4 attenuation; // [x] 衰减系数 [yzw] 预留(目前未使用)
+    
+};
+
+struct SpotLight
+{
+    float3 position;
+    float range;
+    float4 color;
+    float3 direction;      // ← 必加：聚光灯朝向
+    float spotInnerCutoff; // ← 建议加：内锥角 cos
+    float spotOuterCutoff; // spotCutoff 改名，外层截止 cos
+    float spotExponent;
+    float attenuation;
+    uint32_t TextureSlot; // cookie/gobo 投影纹理
 };
 
 struct PushConstants

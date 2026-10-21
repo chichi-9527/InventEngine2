@@ -198,7 +198,7 @@ float4 FSMain(VSOutput input) : SV_Target
                 continue;
 
             float3 H = normalize(V + L);
-            float attenuation = 1.0 / (1.0 + light.attenuation * dist * dist);
+            float attenuation = 1.0 / (1.0 + light.attenuation.x * dist * dist);
             float3 radiance = light.color.rgb * attenuation;
 
             float NDF = DistributionGGX(N, H, roughness);
