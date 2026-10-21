@@ -1,4 +1,4 @@
-﻿
+
 file(GLOB_RECURSE EDITOR_SRCS "src/*.cpp")
 file(GLOB_RECURSE EDITOR_INCS "src/*.h")
 file(GLOB_RECURSE IMGUI_FILES
@@ -9,6 +9,10 @@ file(GLOB_RECURSE IMGUI_FILES
 set(EDITOR_ALL ${EDITOR_SRCS} ${EDITOR_INCS} ${IMGUI_FILES})
 
 add_executable(EngineEditor ${EDITOR_ALL})
+
+set_target_properties(EngineEditor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/EngineEditor"
+)
 
 target_precompile_headers(EngineEditor PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Private/editor_pch.h"
@@ -63,13 +67,8 @@ target_compile_definitions(EngineEditor
     PRIVATE "CURRENT_BUILD_CONFIG=\"$<CONFIG>\""
 )
 
-if(ENGINE_BUILD_EDITOR)
-    set_target_properties(EngineEditor PROPERTIES OUTPUT_NAME "EngineEditor")
-    target_compile_definitions(EngineEditor PRIVATE "INVENT_EDITOR=1")
-else()
-    set_target_properties(EngineEditor PROPERTIES OUTPUT_NAME "${GAME_NAME}")
-    target_compile_definitions(EngineEditor PRIVATE "INVENT_EDITOR=0")
-endif()
+set_target_properties(EngineEditor PROPERTIES OUTPUT_NAME "EngineEditor")
+target_compile_definitions(EngineEditor PRIVATE "INVENT_EDITOR=1")
 
 set_target_properties(EngineEditor PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
@@ -104,24 +103,9 @@ add_custom_command(TARGET EngineEditor POST_BUILD
     $<TARGET_FILE_DIR:EngineEditor>
 )
 
-if(ENGINE_BUILD_EDITOR)
-    add_custom_command(TARGET EngineEditor POST_BUILD
-        
-        # copy config files to EngineEditor directory
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/../Config"
-        "$<TARGET_FILE_DIR:EngineEditor>/Config"
-    )
-else()
-    add_custom_command(TARGET EngineEditor POST_BUILD
-        
-
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/../Config/GameConfig"
-        "$<TARGET_FILE_DIR:EngineEditor>/Config/GameConfig"
-
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/../Config/Shaders"
-        "$<TARGET_FILE_DIR:EngineEditor>/Config/Shaders"
-    )
-endif()
+add_custom_command(TARGET EngineEditor POST_BUILD
+    # copy config files to EngineEditor directory
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/../Config"
+    "$<TARGET_FILE_DIR:EngineEditor>/Config"
+)

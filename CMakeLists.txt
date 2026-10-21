@@ -134,6 +134,8 @@ add_subdirectory(Engine)
 
 # 编辑器项目
 add_subdirectory(EngineEditor)
+# 启动项目
+add_subdirectory(EngineStarter)
 
 option(INVENT_ENGINE_TEST "Build test project" ON)
 if(INVENT_ENGINE_TEST)
