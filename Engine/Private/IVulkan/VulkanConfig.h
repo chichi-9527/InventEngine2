@@ -21,7 +21,7 @@ namespace IVulkan
 	constexpr std::uint32_t EXPECTED_INSTANCE_SIZE = 1ull * 1024 * 1024; // 预期的实例数量 1M (个) 
 	constexpr std::uint32_t MAX_INSTANCE_BATCH_COUNT = 32u;  // 最大实例批次数量 32（批）
 	constexpr std::uint32_t EXPECTED_UBO_SIZE = 128U;				// 预期的ubo大小 128 (B)
-	constexpr std::uint32_t MAX_POINT_LIGHT_COUNT = 100U;
+	constexpr std::uint32_t MAX_POINT_LIGHT_COUNT = 256U; // 每帧最大点光源数量 256(个)
 	constexpr std::uint32_t DEF_ONE_BUFFER_SIZE = 32ull * 1024 * 1024; // 默认管理类中单个 VkBuffer 大小  32 (MB)
 	constexpr std::uint32_t DEF_STAGING_BUFFER_SIZE = 32ull * 1024 * 1024; // 默认单个暂存缓冲区 VkBuffer 大小  32 (MB)
 	constexpr std::uint64_t CREATE_VKIMAGE_LIMIT = 1ull * 1024 * 1024; // 当创建小于 1(MB) 字节的 VkImage 时用 vmaPool,否则強制开启 Dedicated 独立分配
@@ -36,6 +36,9 @@ namespace IVulkan
 	constexpr std::uint32_t DEF_RESIDENT_INDEX_BUFFER_COUNT = 4u * 1024; // 默认常驻索引 buffer 顶点个数 4096(个)
 	constexpr std::uint32_t DEF_MATERIAL_COUNT_PER_BUFFER = 16384;		// 每个材质 buffer 槽位数 (16384 * 32B = 512KB)
 	constexpr VkDeviceSize DEF_MATERIAL_DIRTY_STAGING_BYTES = 256 * 1024;	// 每帧脏上传上限 (256KB = 8192 材质/帧, 溢出部分留到下帧)
+
+	// in shader 
+	constexpr std::uint32_t ComputeShaderThreadXCount = 64u; // 计算着色器 x 线程数量 64(个), 根据 shader 中具体数量
 
 	inline VkDeviceSize TotalVRAM{ 0 };
 	// 计算出的各种 buffer 的总大小(B) ,总显存(TotalVRAM)的 70%

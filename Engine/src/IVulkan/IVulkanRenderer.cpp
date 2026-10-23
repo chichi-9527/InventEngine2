@@ -9,6 +9,10 @@
 #include "ILog.h"
 #include "IEngine.h"
 
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <cmath>
 #include <cstring>
 
 namespace IVulkan
@@ -30,22 +34,11 @@ namespace IVulkan
 		std::uint32_t UseLightFlags = LightFlag::UseNone; // 是否使用光源 LightFlag
 	};
 
-	enum LightType : uint32_t
-	{
-		PointLight = 0,
-		SpotLight = 1,
-	};
-
 	struct PointLight
 	{
-		glm::vec3 position;
-		float radius;
-		glm::vec4 color;
-		float attenuation; // 衰减系数
-		std::uint32_t lightType; // 灯光类型 LightType
-		float spotExponent; // 聚光灯指数
-		float spotCutoff; // 聚光灯截止角度
-		std::uint32_t TextureSlot; // 纹理槽位
+		glm::vec4 position_radius{ 0.0f }; // [xyz] 位置 [w] 半径
+		glm::vec4 color{ 1.0f };
+		glm::vec4 attenuation{ 1.0f }; // [x] 衰减系数 [yzw] 预留(目前未使用)
 	};
 
 }
@@ -56,6 +49,12 @@ namespace INVENT
 	constexpr const char* TestQuadFSPath = "Config/Shaders/SPV/TestQuad.slang.frag.spv";
 	constexpr const char* TestFeedbackCSPath = "Config/Shaders/SPV/TestMipFeedback.slang.comp.spv";
 	constexpr const char* TestTexturePath = "Config/EngineAssets/image/test.png.dds";
+
+	constexpr const char* MainMeshVSPath = "Config/Shaders/SPV/MainMesh.vert.spv";
+	constexpr const char* MainMeshFSPath = "Config/Shaders/SPV/MainMesh.frag.spv";
+	constexpr const char* GeneralCSPath = "Config/Shaders/SPV/GeneralCompute.comp.spv";
+
+	static IVulkan::PushConstants pushConstants{};
 
 	bool IVulkanRenderer::Init()
 	{
@@ -99,24 +98,55 @@ namespace INVENT
 	bool IVulkanRenderer::_init_buffers()
 	{
 		auto& base = IVulkanBase::Base();
-		const auto n = IVulkan::MAX_FRAMES_IN_FLIGHT;
 
-		// (预留) 每帧 ubo, 测试阶段写一次 identity VP
-		_ubo_buffers.resize(n);
-		for (std::uint32_t i = 0; i < n; ++i)
+		// 每帧 buffers
+		_ubo_buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
+		_point_light_buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
+		_draw_count_and_indirect_buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
+
+		// point light
+		VkDeviceSize pointLightSSBOSize = sizeof(IVulkan::PointLight) * IVulkan::MAX_POINT_LIGHT_COUNT;
+		// binding3
+		VkDeviceSize binding3Size = sizeof(std::uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT +
+			sizeof(VkDrawIndirectCommand) * IVulkan::EXPECTED_INSTANCE_SIZE;
+		VkBufferUsageFlags binding3UsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+		// 在渲染前需要用 vkCmdFillBuffer 將其清零加上 TRANSFER_DST 標記
+		binding3UsageFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+		for (std::uint32_t i = 0; i < IVulkan::MAX_FRAMES_IN_FLIGHT; ++i)
 		{
-			void* mapped = nullptr;
+			// ubo
 			if (VkResult r = base.UseVmaCreateBuffer(sizeof(IVulkan::UBO),
 				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
 				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-				_ubo_buffers[i], &mapped))
+				_ubo_buffers[i].buffer, &_ubo_buffers[i].mapped))
 			{
 				INVENT_LOG_ERROR(std::format("[IVulkanRenderer] ubo 缓冲创建失败! VkResult: {}.", static_cast<std::int32_t>(r)));
 				return false;
 			}
-			IVulkan::UBO uboData{};	// VP = identity
-			std::memcpy(mapped, &uboData, sizeof(uboData));
-			base.UseVmaFlushAllocationBuffer(_ubo_buffers[i]);
+
+			// binding1 light
+			if (VkResult r = base.UseVmaCreateBuffer(pointLightSSBOSize,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+				_point_light_buffers[i].buffer, &_point_light_buffers[i].mapped))
+			{
+				INVENT_LOG_ERROR(std::format("[IVulkanRenderer] ubo 缓冲创建失败! VkResult: {}.", static_cast<std::int32_t>(r)));
+				return false;
+			}
+
+			// binding3
+			if (VkResult r = base.UseVmaCreateBuffer(binding3Size,
+				binding3UsageFlags,
+				0,
+				_draw_count_and_indirect_buffers[i].buffer, 
+				nullptr))
+			{
+				INVENT_LOG_ERROR("[IVulkanRenderer] VkDrawIndirectCommand ssbo 创建失败!");
+				return false;
+			}
+
+
 		}
 
 		// 测试实例数据: 1 个实例 = 1 个 uint (texture slot), 内容在 _init_test_resources 填
@@ -129,30 +159,6 @@ namespace INVENT
 			return false;
 		}
 
-		// binding3
-		VkDeviceSize binding3Size = sizeof(std::uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT +
-			sizeof(VkDrawIndexedIndirectCommand) * IVulkan::EXPECTED_INSTANCE_SIZE;
-		VkBufferUsageFlags binding3UsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-		// 在渲染前需要用 vkCmdFillBuffer 將其清零加上 TRANSFER_DST 標記
-		binding3UsageFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-		if (VkResult r = base.UseVmaCreateBuffer(binding3Size,
-			binding3UsageFlags,
-			0,
-			_draw_count_and_indirect_buffer, nullptr))
-		{
-			INVENT_LOG_ERROR("[IVulkanRenderer] VkDrawIndexedIndirectCommand ssbo 创建失败!");
-			return false;
-		}
-
-		// 未使用 binding 的占位 ssbo
-		if (VkResult r = base.UseVmaCreateBuffer(16,
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-			VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-			_dummy_ssbo, nullptr))
-		{
-			INVENT_LOG_ERROR("[IVulkanRenderer] 占位 ssbo 创建失败!");
-			return false;
-		}
 		return true;
 	}
 
@@ -170,10 +176,10 @@ namespace INVENT
 				INVENT_LOG_ERROR(std::format("[IVulkanRenderer] set0[{}] 分配失败! VkResult: {}.", i, static_cast<std::int32_t>(r)));
 				return false;
 			}
-			_write_buffer_binding(_set0[i], 0, _ubo_buffers[i], true);		// ubo (identity VP)
-			_write_buffer_binding(_set0[i], 1, _dummy_ssbo, false);		// 灯光 (占位)
-			_write_buffer_binding(_set0[i], 2, _test_instance_buffer, false);	// 实例 (测试)
-			_write_buffer_binding(_set0[i], 3, _draw_count_and_indirect_buffer, false);		// 间接命令
+			_write_buffer_binding(_set0[i], 0, _ubo_buffers[i].buffer, true);		// ubo
+			_write_buffer_binding(_set0[i], 1, _point_light_buffers[i].buffer, false);		// 灯光 
+			_write_buffer_binding(_set0[i], 2, InstanceBuffer::GetBuffer(), false);	// 实例
+			_write_buffer_binding(_set0[i], 3, _draw_count_and_indirect_buffers[i].buffer, false);		// 间接命令
 			// binding 4: 每帧 BindMipFeedback 写
 		}
 		return true;
@@ -195,6 +201,42 @@ namespace INVENT
 		w.pBufferInfo = &bi;
 
 		vkUpdateDescriptorSets(IVulkanBase::Base().GetDevice(), 1, &w, 0, nullptr);
+	}
+
+	void IVulkanRenderer::_upload_per_frame_data(std::uint32_t frame_index)
+	{
+		auto& base = IVulkanBase::Base();
+		auto& engine = IEngine::Instatnce();
+
+		IVulkan::UBO ubo{};
+		/////////////////////
+		auto aspectRatio = engine.GetWindowAspectRatio();
+		glm::mat4 projectionMatrix{ 1.0f };
+		if (aspectRatio != 0.0f) 
+		{ 
+			projectionMatrix = glm::perspective(glm::radians(45.0f), aspectRatio, 0.1f, 100.0f);
+		}
+		glm::mat4 viewMatrix{ 1.0f };
+		glm::vec3 cameraPos = { 0.0f,0.0f,2.0f };
+		glm::vec3 cameraForward = { 0.0f,0.0f,-1.0f };
+		glm::vec3 cameraUp = { 0.0f,1.0f,0.0f };
+		viewMatrix = glm::lookAt(cameraPos, cameraPos + cameraForward, cameraUp);
+		//////////////////////
+		ubo.VP = projectionMatrix * viewMatrix;
+		ubo.cameraDatas = { cameraPos, 0.0f };
+		if (auto height = engine.GetWindowHeight())
+		{
+			ubo.cameraDatas.w = static_cast<float>(height) / (2.0f * std::tan(glm::radians(45.0f) / 2.0f));
+		}
+
+		memcpy(_ubo_buffers[frame_index].mapped, &ubo, sizeof(IVulkan::UBO));
+
+		//IVulkan::PointLight lights[IVulkan::MAX_POINT_LIGHT_COUNT]{};
+		// TODO: 从场景收集点光源数据
+		//memcpy(_point_light_buffers[frame_index].mapped, lights, sizeof(lights));
+
+		base.UseVmaFlushAllocationBuffer(_ubo_buffers[frame_index].buffer);
+		//base.UseVmaFlushAllocationBuffer(_point_light_buffers[frame_index].buffer);
 	}
 
 	bool IVulkanRenderer::_recreate_swapchain()
@@ -242,16 +284,16 @@ namespace INVENT
 	bool IVulkanRenderer::_init_pipelines()
 	{
 		auto& base = IVulkanBase::Base();
-		auto vs = base.CreateShaderMoudle(TestQuadVSPath);
-		auto fs = base.CreateShaderMoudle(TestQuadFSPath);
-		auto cs = base.CreateShaderMoudle(TestFeedbackCSPath);
+		auto vs = base.CreateShaderMoudle(MainMeshVSPath);
+		auto fs = base.CreateShaderMoudle(MainMeshFSPath);
+		auto cs = base.CreateShaderMoudle(GeneralCSPath);
 		if (vs == VK_NULL_HANDLE || fs == VK_NULL_HANDLE || cs == VK_NULL_HANDLE)
 		{
 			INVENT_LOG_FATAL("[IVulkanRenderer] 测试 shader 加载失败!");
 			return false;
 		}
 
-		// 测试图形管线: 手动顶点拉取(顶点硬编码在 VS)
+		// 图形管线
 		IVulkanBase::GraphicsPipelineConfig cfg{};
 		cfg.VertexShader = vs;
 		cfg.FragmentShader = fs;
@@ -324,6 +366,29 @@ namespace INVENT
 		base.UseVmaFlushAllocationBuffer(_test_instance_buffer);
 
 		INVENT_LOG_INFO(std::format("[IVulkanRenderer] test texture slot: {}.", h.slot));
+
+		// test insatane / material
+		auto gviHandle = IVulkanGlobalVerticesIndices::Instance().GetDefVertexIndexData(IVulkanGlobalVerticesIndices::DefMeshVertHandle::DefQuad);
+		Material testMaterial{};
+		testMaterial.DiffuseTextureId = static_cast<uint16_t>(_test_texture_slot);
+		testMaterial.textureReadyFlags = IMaterialTextureHasFlag::HasBitDeffuse;
+		auto mHandle = IVulkanGlobalMaterial::Instance().AddMaterial(testMaterial);
+		InstanceBuffer::InstanceData testData{};
+		testData.Model = { 1.0f };
+		testData.VertexAddress = gviHandle.vertexAddress;
+		testData.IndexAddress = gviHandle.indexAddress;
+		testData.IndexCount = gviHandle.indexCount;
+		testData.MaterialAddress = IVulkanGlobalMaterial::Instance().GetMaterialAddress(mHandle);
+		testData.AABBExtent = { 0.5f,0.5f,0.5f,0.0f };
+		testData.ObjectID = 1;
+		testData.LevelID = 0;
+		testData.InstanceOptionFlags |= InstanceBuffer::InstanceOptionFlag::ShowInstance;
+		if (gviHandle.use32BitIndex)
+		{
+			testData.InstanceOptionFlags |= InstanceBuffer::InstanceOptionFlag::Use32BitIndex;
+		}
+		auto instanceHandle = InstanceBuffer::AddInstanceData(testData);
+		
 		return true;
 	}
 
@@ -375,6 +440,9 @@ namespace INVENT
 		}
 		vkResetFences(device, 1, &_frame_fences[frameindex]);
 
+		// 
+		_upload_per_frame_data(frameindex);
+
 		// 4) set0 binding 4: 本帧反馈缓冲
 		texMgmt.BindMipFeedback(_set0[frameindex], frameindex);
 
@@ -407,15 +475,48 @@ namespace INVENT
 
 		// 脏材质上传 + 读屏障
 		IVulkanGlobalMaterial::Instance().FlushDirtyMaterials(cmd, frameindex);
+		// 实例刷新
+		InstanceBuffer::FlushBuffer();
 
-		// 3) mip 反馈 CS (裁剪 CS 的测试替身)
-		vkCmdFillBuffer(cmd, _draw_count_and_indirect_buffer, 0, sizeof(uint32_t), 0);	// 将shader中渲染原子计数器置0
+		// 3) mip 反馈 CS
+		vkCmdFillBuffer(cmd, _draw_count_and_indirect_buffers[frameindex].buffer,
+			0, 
+			sizeof(uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT,
+			0);	// 将shader中渲染原子计数器置0
 		texMgmt.ResetMipFeedback(cmd, frameindex);		// fill 0xFF + transfer->compute 屏障
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
 			base.GetVkPipelineLayout(), 0, 1, &_set0[frameindex], 0, nullptr);
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _compute_pipeline);
-		vkCmdDispatch(cmd, 1, 1, 1);
+		// 传入 Push Constants
+		pushConstants.BatchID = 0;
+		pushConstants.DrawObjectIndexOffset = 0;
+		vkCmdPushConstants(cmd,
+			base.GetVkPipelineLayout(),
+			base.GetPushConstantStageFlags(),
+			0,
+			sizeof(IVulkan::PushConstants),
+			&pushConstants);
+		// 
+		auto instanceNeedCount = InstanceBuffer::GetUsedHighWaterMark(0);
+		//INVENT_LOG_DEBUG(std::format("[renderer debug] instanceNeedCount: {}.", instanceNeedCount));
+		vkCmdDispatch(cmd, (instanceNeedCount + 63) / 64, 1, 1);
 		texMgmt.RecordMipFeedbackCopy(cmd, frameindex);	// compute->transfer 屏障 + 拷贝 readback
+
+		// CS → Draw Indirect 屏障：确保 compute shader 写入的间接命令对绘制可见
+		{
+			VkMemoryBarrier2 mb{};
+			mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+			mb.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+			mb.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+			mb.dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+			mb.dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+
+			VkDependencyInfo di{};
+			di.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+			di.memoryBarrierCount = 1;
+			di.pMemoryBarriers = &mb;
+			vkCmdPipelineBarrier2(cmd, &di);
+		}
 
 		// 4) quad 绘制 (动态渲染)
 		VkDescriptorSet sets[2] = { _set0[frameindex], base.GetGlobalBindlessDescriptorSet() };
@@ -457,7 +558,12 @@ namespace INVENT
 		ri.pDepthAttachment = &depth;
 
 		vkCmdBeginRendering(cmd, &ri);
-		vkCmdDraw(cmd, 6, 1, 0, 0);		// 手动顶点拉取: 6 顶点 = quad
+		//vkCmdDraw(cmd, 6, 1, 0, 0);		// 手动顶点拉取: 6 顶点 = quad
+		vkCmdDrawIndirectCount(cmd,
+			_draw_count_and_indirect_buffers[frameindex].buffer, sizeof(uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT,
+			_draw_count_and_indirect_buffers[frameindex].buffer, 0,
+			IVulkan::EXPECTED_INSTANCE_SIZE,
+			sizeof(VkDrawIndirectCommand));
 		vkCmdEndRendering(cmd);
 
 		// 5) COLOR_ATTACHMENT -> PRESENT_SRC
@@ -613,10 +719,22 @@ namespace INVENT
 		if (_global_sampler != VK_NULL_HANDLE) { vkDestroySampler(device, _global_sampler, nullptr); _global_sampler = VK_NULL_HANDLE; }
 
 		if (_test_instance_buffer != VK_NULL_HANDLE) { base.UseVmaDestroyBuffer(_test_instance_buffer); _test_instance_buffer = VK_NULL_HANDLE; }
-		if (_dummy_ssbo != VK_NULL_HANDLE) { base.UseVmaDestroyBuffer(_dummy_ssbo); _dummy_ssbo = VK_NULL_HANDLE; }
-		if (_draw_count_and_indirect_buffer != VK_NULL_HANDLE) { base.UseVmaDestroyBuffer(_draw_count_and_indirect_buffer); _draw_count_and_indirect_buffer = VK_NULL_HANDLE; }
-		for (auto b : _ubo_buffers)
-			if (b != VK_NULL_HANDLE) base.UseVmaDestroyBuffer(b);
+		for (auto& b : _ubo_buffers)
+		{
+			if (b.buffer != VK_NULL_HANDLE) base.UseVmaDestroyBuffer(b.buffer);
+			b.buffer = VK_NULL_HANDLE;
+		}
+		for (auto& b : _point_light_buffers)
+		{
+			if (b.buffer != VK_NULL_HANDLE) base.UseVmaDestroyBuffer(b.buffer);
+			b.buffer = VK_NULL_HANDLE;
+		}
+		for (auto& b : _draw_count_and_indirect_buffers)
+		{
+			if (b.buffer != VK_NULL_HANDLE) base.UseVmaDestroyBuffer(b.buffer);
+			b.buffer = VK_NULL_HANDLE;
+		}
+			
 		_ubo_buffers.clear();
 		_test_instance_mapped = nullptr;
 

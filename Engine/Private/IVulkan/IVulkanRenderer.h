@@ -20,6 +20,12 @@ namespace INVENT
 	*/
 	class IVulkanRenderer
 	{
+		struct U_SS_BO 
+		{
+			VkBuffer buffer = VK_NULL_HANDLE;
+			void* mapped = nullptr;
+		};
+
 	public:
 		static bool Init();
 		static void Shutdown();
@@ -38,6 +44,7 @@ namespace INVENT
 		static void _record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present);
 		static void _record_depth_barrier(VkCommandBuffer cmd, VkImage depth_image);
 		static void _write_buffer_binding(VkDescriptorSet set, std::uint32_t binding, VkBuffer buffer, bool is_ubo);
+		static void _upload_per_frame_data(std::uint32_t frame_index);
 		static bool _recreate_swapchain();
 		static void _clear();
 
@@ -55,15 +62,17 @@ namespace INVENT
 		// set0: 每帧一份 (一个 set 包含 binding 0~4 全部)
 		inline static std::vector<VkDescriptorSet> _set0;
 
-		// (预留) 每帧 ubo; 测试阶段只写一次 identity VP
-		inline static std::vector<VkBuffer> _ubo_buffers;
+		// 每帧 ubo;
+		inline static std::vector<U_SS_BO> _ubo_buffers;
+		// 未使用 binding (1灯光/3间接命令) 的占位, 防未更新告警
+		inline static std::vector<U_SS_BO> _point_light_buffers;
+		// binding 3 间接命令 (含每个批次的 drawCount)
+		inline static std::vector<U_SS_BO> _draw_count_and_indirect_buffers;
+
 		// 测试实例数据: [0] = 测试纹理 slot; 接真实渲染时换成 InstanceBuffer 的 ssbo
 		inline static VkBuffer _test_instance_buffer = VK_NULL_HANDLE;
 		inline static void* _test_instance_mapped = nullptr;
-		// 未使用 binding (1灯光/3间接命令) 的占位, 防未更新告警
-		inline static VkBuffer _dummy_ssbo = VK_NULL_HANDLE;
-		// binding 3 间接命令 (含每个批次的 drawCount)
-		inline static VkBuffer _draw_count_and_indirect_buffer = VK_NULL_HANDLE;
+		
 
 		inline static VkClearValue _vk_clear{};
 
