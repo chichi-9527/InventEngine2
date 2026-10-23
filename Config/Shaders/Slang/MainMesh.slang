@@ -4,7 +4,7 @@
 #include "CalculateFunctions.slang"
 
 [[vk::binding(0, 0)]] ConstantBuffer<UBO> gUBO;
-[[vk::binding(1, 0)]] StructuredBuffer<PointLight, ScalarDataLayout> gPointLights; // 点光源 & 聚光灯 SSBO
+[[vk::binding(1, 0)]] StructuredBuffer<PointLight, ScalarDataLayout> gPointLights; // 点光源 SSBO
 [[vk::binding(2, 0)]] StructuredBuffer<InstanceData, ScalarDataLayout> gInstanceData; // 实例数据 SSBO
 // 將計數器與命令陣列合併到同一個寫回 Buffer 中
 // 實例繪製命令 Buffer (SSBO) 前 4*32 个字节為 drawCount(uint32_t) (与cpp端批次数量一致32个，修改时需要同步更新cpp端)
@@ -26,15 +26,15 @@ struct VSOutput
     float3 bitangent : BITANGENT;
     float2 uv : UV;
     float4 color : COLOR;
-    nointerpolation uint16_t diffuseTexId : DIFFUSE_TEX_ID;
-    nointerpolation uint16_t normalTexId : NORMAL_TEX_ID;
-    nointerpolation uint16_t specularTexId : SPECULAR_TEX_ID;
-    nointerpolation uint16_t emissionTexId : EMISSION_TEX_ID;
-    nointerpolation uint16_t aoTexId : AO_TEX_ID;
-    nointerpolation uint16_t opacityTexId : OPACITY_TEX_ID;
-    nointerpolation uint16_t roughnessTexId : ROUGHNESS_TEX_ID;
-    nointerpolation uint16_t materialAttribute : MATERIAL_ATTRIBUTE;
-    nointerpolation uint16_t textureReadyFlags : TEXTURE_READY_FLAGS;
+    nointerpolation uint diffuseTexId : DIFFUSE_TEX_ID;
+    nointerpolation uint normalTexId : NORMAL_TEX_ID;
+    nointerpolation uint specularTexId : SPECULAR_TEX_ID;
+    nointerpolation uint emissionTexId : EMISSION_TEX_ID;
+    nointerpolation uint aoTexId : AO_TEX_ID;
+    nointerpolation uint opacityTexId : OPACITY_TEX_ID;
+    nointerpolation uint roughnessTexId : ROUGHNESS_TEX_ID;
+    nointerpolation uint materialAttribute : MATERIAL_ATTRIBUTE;
+    nointerpolation uint textureReadyFlags : TEXTURE_READY_FLAGS;
     nointerpolation uint32_t instanceIndex : INSTANCE_INDEX;
 };
 
@@ -45,8 +45,11 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     uint32_t instanceIndex = instanceId; // firstInstance 会被硬件加上, 等价于 gIndirectArgsBuffer 中存储的 instanceIndex
     InstanceData instance = gInstanceData[instanceIndex];
 
-    // 从 bindless 顶点缓冲区读取顶点数据
-    InVertex inVert = instance.vertexAddress[vertexId];
+    // 从 bindless 索引缓冲区读取实际顶点索引
+    uint optionFlags = GetOptionFlags(instance);
+    bool use32Bit = (optionFlags & InstanceOptionFlag::Use32BitIndex) != 0;
+    uint actualVertex = ReadIndex(instance.indexAddress, vertexId, use32Bit);
+    InVertex inVert = instance.vertexAddress[actualVertex];
     CalculatedVertex vert = CalculateVertex(inVert);
 
     // 世界空间变换
@@ -61,7 +64,7 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     output.uv = vert.uv.xy;
 
     // UseUV: 2D 精灵使用 instance.uv 映射图集区域 (lerp between xy=min, zw=max)
-    if ((instance.optionFlags & InstanceOptionFlag::UseUV) != 0)
+    if ((optionFlags & InstanceOptionFlag::UseUV) != 0)
     {
         output.uv = lerp(instance.uv.xy, instance.uv.zw, vert.uv.xy);
     }
@@ -69,15 +72,15 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
 
     // 材质信息透传
     Material mat = instance.materialAddress[0];
-    output.diffuseTexId = mat.DiffuseTextureId;
-    output.normalTexId = mat.NormalTextureId;
-    output.specularTexId = mat.SpecularTextureId;
-    output.emissionTexId = mat.EmissionTextureId;
-    output.aoTexId = mat.AoTextureId;
-    output.opacityTexId = mat.OpacityTextureId;
-    output.roughnessTexId = mat.RoughnessTextureId;
-    output.materialAttribute = mat.MaterialAttribute;
-    output.textureReadyFlags = mat.textureReadyFlags;
+    output.diffuseTexId = GetDiffuseTextureId(mat);
+    output.normalTexId = GetNormalTextureId(mat);
+    output.specularTexId = GetSpecularTextureId(mat);
+    output.emissionTexId = GetEmissionTextureId(mat);
+    output.aoTexId = GetAoTextureId(mat);
+    output.opacityTexId = GetOpacityTextureId(mat);
+    output.roughnessTexId = GetRoughnessTextureId(mat);
+    output.materialAttribute = GetMaterialAttribute(mat);
+    output.textureReadyFlags = GetTextureReadyFlags(mat);
     output.instanceIndex = instanceIndex;
     return output;
 }
@@ -104,19 +107,20 @@ float4 FSMain(VSOutput input) : SV_Target
     float3 albedo = input.color.rgb;
 
     // AllMarerialTexIsDeffuse: 所有权重混合 8 张漫反射纹理 (2D 精灵/UI)
-    if ((instance.optionFlags & InstanceOptionFlag::AllMarerialTexIsDeffuse) != 0)
+    uint optionFlags = GetOptionFlags(instance);
+    if ((optionFlags & InstanceOptionFlag::AllMarerialTexIsDeffuse) != 0)
     {
         Material mat = instance.materialAddress[0];
-        uint16_t texIds[8] = {
-            mat.DiffuseTextureId, mat.NormalTextureId, mat.SpecularTextureId,
-            mat.EmissionTextureId, mat.AoTextureId, mat.OpacityTextureId,
-            mat.RoughnessTextureId, mat.ClearCoatTextureId
+        uint texIds[8] = {
+            GetDiffuseTextureId(mat), GetNormalTextureId(mat), GetSpecularTextureId(mat),
+            GetEmissionTextureId(mat), GetAoTextureId(mat), GetOpacityTextureId(mat),
+            GetRoughnessTextureId(mat), GetClearCoatTextureId(mat)
         };
         albedo = float3(0.0);
         float weightSum = 0.0;
         for (uint32_t t = 0; t < 8; t++)
         {
-            float w = float(mat.diffuseTextureWeights[t]) / 255.0;
+            float w = float(GetDiffuseTextureWeight(mat, t)) / 255.0;
             if (w > 0.0)
             {
                 albedo += gTexture[NonUniformResourceIndex(texIds[t])].Sample(gSampler, input.uv).rgb * w;
@@ -134,7 +138,7 @@ float4 FSMain(VSOutput input) : SV_Target
     if (gUBO.UseLightFlags == LightFlag::UseNone)
     {
         float alpha = input.color.a;
-        if (!((instance.optionFlags & InstanceOptionFlag::AllMarerialTexIsDeffuse) != 0)
+        if (!((optionFlags & InstanceOptionFlag::AllMarerialTexIsDeffuse) != 0)
             && (input.textureReadyFlags & IMaterialTextureHasFlag::HasBitOpacity) != 0)
         {
             alpha *= gTexture[NonUniformResourceIndex(input.opacityTexId)].Sample(gSampler, input.uv).r;
@@ -190,12 +194,11 @@ float4 FSMain(VSOutput input) : SV_Target
         for (uint32_t i = 0; i < gUBO.pointLightCount; i++)
         {
             PointLight light = gPointLights[i];
-            float3 L = light.position - input.worldPos;
+            float3 L = light.position_radius.xyz - input.worldPos;
             float dist = length(L);
             L /= dist;
 
-            if (dist > light.radius)
-                continue;
+            if (dist > light.position_radius.w) continue; // 超出点光源范围
 
             float3 H = normalize(V + L);
             float attenuation = 1.0 / (1.0 + light.attenuation.x * dist * dist);

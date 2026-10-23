@@ -31,7 +31,7 @@ struct CalculatedVertex
     float4x2 bonesweight;   // 8 个骨骼权重
 };
 
-enum IMaterialTextureHasFlag : uint16_t
+enum IMaterialTextureHasFlag : uint
 {
     HasBitAllNotHas = 0,
     HasBitDeffuse = 1 << 0,
@@ -43,66 +43,97 @@ enum IMaterialTextureHasFlag : uint16_t
     HasBitRoughness = 1 << 6,
     HasBitClearCoat = 1 << 7
 };
-enum IMaterialAttributeFlag : uint16_t
+enum IMaterialAttributeFlag : uint
 {
     UnDefined = 0,
     Metal = 1,
     NonMetal = 2,
 };
 
+// Material 辅助访问器（替代 uint16_t 字段，内存布局不变）
+uint GetMaterialAttribute(Material m)     { return m.packed0 & 0xFFFFu; }
+uint GetTextureReadyFlags(Material m)     { return m.packed0 >> 16; }
+uint GetDiffuseTextureId(Material m)      { return m.packed1 & 0xFFFFu; }
+uint GetNormalTextureId(Material m)       { return m.packed1 >> 16; }
+uint GetSpecularTextureId(Material m)     { return m.packed2 & 0xFFFFu; }
+uint GetEmissionTextureId(Material m)     { return m.packed2 >> 16; }
+uint GetAoTextureId(Material m)           { return m.packed3 & 0xFFFFu; }
+uint GetOpacityTextureId(Material m)      { return m.packed3 >> 16; }
+uint GetRoughnessTextureId(Material m)    { return m.packed4 & 0xFFFFu; }
+uint GetClearCoatTextureId(Material m)    { return m.packed4 >> 16; }
+
+void SetMaterialAttribute(inout Material m, uint v) { m.packed0 = (m.packed0 & 0xFFFF0000u) | (v & 0xFFFFu); }
+void SetTextureReadyFlags(inout Material m, uint v) { m.packed0 = (m.packed0 & 0xFFFFu) | ((v & 0xFFFFu) << 16); }
+void SetDiffuseTextureId(inout Material m, uint v)  { m.packed1 = (m.packed1 & 0xFFFF0000u) | (v & 0xFFFFu); }
+void SetNormalTextureId(inout Material m, uint v)   { m.packed1 = (m.packed1 & 0xFFFFu) | ((v & 0xFFFFu) << 16); }
+void SetSpecularTextureId(inout Material m, uint v) { m.packed2 = (m.packed2 & 0xFFFF0000u) | (v & 0xFFFFu); }
+void SetEmissionTextureId(inout Material m, uint v) { m.packed2 = (m.packed2 & 0xFFFFu) | ((v & 0xFFFFu) << 16); }
+void SetAoTextureId(inout Material m, uint v)       { m.packed3 = (m.packed3 & 0xFFFF0000u) | (v & 0xFFFFu); }
+void SetOpacityTextureId(inout Material m, uint v)  { m.packed3 = (m.packed3 & 0xFFFFu) | ((v & 0xFFFFu) << 16); }
+void SetRoughnessTextureId(inout Material m, uint v){ m.packed4 = (m.packed4 & 0xFFFF0000u) | (v & 0xFFFFu); }
+void SetClearCoatTextureId(inout Material m, uint v){ m.packed4 = (m.packed4 & 0xFFFFu) | ((v & 0xFFFFu) << 16); }
+
 struct Material
 {
-    // 材质属性 IMaterialAttributeFlag
-    uint16_t MaterialAttribute;
-    // 贴图标记（是否准备好）
-    uint16_t textureReadyFlags;
+    // 材质属性（替代原来的 uint16_t 字段，两两打包为 uint，内存布局不变）
+    // packed0: [15:0] = MaterialAttribute, [31:16] = textureReadyFlags
+    // packed1: [15:0] = DiffuseTextureId,  [31:16] = NormalTextureId
+    // packed2: [15:0] = SpecularTextureId, [31:16] = EmissionTextureId
+    // packed3: [15:0] = AoTextureId,       [31:16] = OpacityTextureId
+    // packed4: [15:0] = RoughnessTextureId,[31:16] = ClearCoatTextureId
+    uint packed0;
+    uint packed1;
+    uint packed2;
+    uint packed3;
+    uint packed4;
 
-    //
-    uint16_t DiffuseTextureId;
-    // 法线贴图
-    uint16_t NormalTextureId;
-    // 镜面反射贴图
-    uint16_t SpecularTextureId;
-    // 自发光
-    uint16_t EmissionTextureId;
-    // 环境遮挡
-    uint16_t AoTextureId;
-    // 不透明度
-    uint16_t OpacityTextureId;
-    // 粗糙度
-    uint16_t RoughnessTextureId;
-    // 透明涂层
-    uint16_t ClearCoatTextureId;
+    // 8 个 uint8 权重，打包为 2 个 uint（每个 uint 存 4 个 byte），内存布局不变
+    uint packedWeights0; // weight[0..3]
+    uint packedWeights1; // weight[4..7]
 
-    uint8_t diffuseTextureWeights[8]; // 当纹理均视为漫反射贴图时，表示8张纹理的权重（0-255）默认值为 0,所有权重之和为 255
-
-    uint8_t padding[4];
+    uint _padding;       // 4 bytes 对齐填充（原 uint8_t padding[4]）
 };
 
-enum InstanceOptionFlag : uint16_t 
+// 材质 diffuse 权重访问器（替代 uint8_t 数组）
+uint GetDiffuseTextureWeight(Material m, uint index)
+{
+    uint packed = (index < 4u) ? m.packedWeights0 : m.packedWeights1;
+    uint shift = (index & 3u) * 8u;
+    return (packed >> shift) & 0xFFu;
+}
+
+enum InstanceOptionFlag : uint
 {
     NoUse = 0,
     UseUV = 1 << 0, // 仅限 2d 精灵使用 instanceData.uv 而不是 vertex.uv
     ShowInstance = 1 << 1, // 显示实例
-    AllMarerialTexIsDeffuse = 1 << 2 // 所有材质贴图都是漫反射贴图
+    AllMarerialTexIsDeffuse = 1 << 2, // 所有材质贴图都是漫反射贴图
+    Use32BitIndex = 1 << 3             // 索引用 uint32_t；未设置则按 uint16_t 读取
 };
+
+// 骨骼占位结构体（暂时不使用）
+struct BoneSkeletonPlaceHolder { uint _placeholder; };
 
 struct InstanceData
 {
     float4x4 model;
     InVertex* vertexAddress;
     Material* materialAddress;
-    void* indexAddress; // 索引地址 数量大于等于 65536 时使用 uint32_t 索引 否则使用 uint16_t 索引
-    void* boneAddress;  // 骨骼地址 ,暂时不支持
+    uint* indexAddress; // 索引缓冲区地址，通过 InstanceOptionFlag::Use32BitIndex 判断格式
+    BoneSkeletonPlaceHolder* boneAddress;  // 骨骼占位，暂时不支持
     float4 uv; // 2d 精灵使用的大图 uv
     float4 color; // 颜色
     float4 AABBExtent; // 实例 AABB box [xyz] 为半径 [w] 预留(包围球半径，目前未使用)
     uint32_t indexCount; // 索引数量
     uint32_t boneCount; // 骨骼数量
     uint32_t objectID; // 实例ID 为0时无效 计算着色器剔除该实例
-    uint16_t optionFlags; // 实例选项
-    uint16_t levelID;     // 实例所属关卡 ID
+    // [15:0] = optionFlags, [31:16] = levelID（原 uint16_t x2 打包为 uint）
+    uint packedOption_Level;
 };
+
+// InstanceData 辅助访问器
+uint GetOptionFlags(InstanceData d) { return d.packedOption_Level & 0xFFFFu; }
+uint GetLevelID(InstanceData d)     { return d.packedOption_Level >> 16; }
 
 enum LightFlag : uint32_t
 {
@@ -124,11 +155,9 @@ struct UBO
 // 使用 ScalarDataLayout 优化内存对齐，float3 不会对齐到 16 字节
 struct PointLight
 {
-    float3 position;
-    float radius;
+    float4 position_radius; // [xyz] 位置 [w] 半径
     float4 color;
     float4 attenuation; // [x] 衰减系数 [yzw] 预留(目前未使用)
-    
 };
 
 struct SpotLight
@@ -153,10 +182,9 @@ struct PushConstants
 [[vk_push_constant]] PushConstants gPushConstants;
 
 // vulkan 实例绘制命令
-struct VkDrawIndexedIndirectCommand {
-    uint32_t indexCount;
-    uint32_t instanceCount;
-    uint32_t firstIndex;
-    int32_t vertexOffset;
-    uint32_t firstInstance;
+struct VkDrawIndirectCommand {
+    uint32_t vertexCount;   // 填入你要繪製的頂點數量 (例如 3 代表三角形)
+    uint32_t instanceCount; // 實例數量 (通常為 1)
+    uint32_t firstVertex;   // 起始頂點偏移
+    uint32_t firstInstance; // 起始實例偏移
 };

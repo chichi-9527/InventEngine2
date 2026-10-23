@@ -9,14 +9,14 @@
 
 // 將計數器與命令陣列合併到同一個寫回 Buffer 中
 // 實例繪製命令 Buffer (SSBO) 前 4*32 个字节為 drawCount(uint32_t) (与cpp端批次数量一致32个，修改时需要同步更新cpp端) 
-// 後面為命令陣列(VkDrawIndexedIndirectCommand)
+// 後面為命令陣列(VkDrawIndirectCommand)
 [[vk::binding(3, 0)]] RWByteAddressBuffer gIndirectArgsBuffer;
 
 // 單純的 uint 陣列，長度等於 Bindless 紋理的最大數量
 [[vk::binding(4, 0)]] RWStructuredBuffer<uint> gTextureDesiredMip; // 紋理 mip 反饋 SSBO
 
 // LevelID 通配值
-static const uint16_t kLevelID_All = 0xFFFF;
+static const uint kLevelID_All = 0xFFFFu;
 // 最大 mip 等級 (對應 4096 分辨率)
 static const uint32_t kMaxMipLevel = 12;
 // 預留的最大批次數量上限（128 位元組計數器區）
@@ -75,7 +75,7 @@ float3 TransformHalfExtent(float4x4 model, float3 localHalfExtent)
 }
 
 // LevelID 過濾
-bool PassesLevelFilter(uint32_t instanceLevelID, uint32_t filterLevelID)
+bool PassesLevelFilter(uint instanceLevelID, uint filterLevelID)
 {
     if (filterLevelID == kLevelID_All)
         return true;
@@ -90,8 +90,10 @@ uint32_t ComputeDesiredMip(float3 worldCenter, float boundingRadius)
     // 使用 UBO.cameraDatas.w (LodFactor)
     float screenDiameterPixels = (2.0 * boundingRadius) * gUBO.cameraDatas.w / max(dist, 0.0001);
 
-    float mip = log2(max(screenDiameterPixels, 1.0));
-    return uint32_t(clamp(floor(mip), 0.0, float(kMaxMipLevel)));
+    // mip 下降级数（分辨率无关）：screenPixels 越大，需要越少下降 = 纹理越高清
+    // C++ 端换算: actualMip = textureMaxMip - clampedDrop
+    float drop = log2(max(screenDiameterPixels, 1.0));
+    return uint32_t(clamp(floor(drop), 0.0, float(kMaxMipLevel)));
 }
 
 [numthreads(64, 1, 1)]
@@ -106,7 +108,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     // 2. 關卡過濾
-    if (!PassesLevelFilter(uint32_t(instance.levelID), gPushConstants.LevelID))
+    if (!PassesLevelFilter(GetLevelID(instance), gPushConstants.LevelID))
         return;
 
     // 3. 視錐裁剪
@@ -124,7 +126,7 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // 利用物體材質中的 DiffuseTextureId 作為 Bindless 陣列的索引
     // 注意：這裡需要通過材質地址取得 DiffuseTextureId
-    uint16_t textureId = instance.materialAddress->DiffuseTextureId;
+    uint textureId = GetDiffuseTextureId(instance.materialAddress[0]);
 
     // 透過原子操作取最小值，保證 C++ 端拿到的是所有看見該紋理的物件中，最渴望高清（Mip 最低）的等級
     InterlockedMin(gTextureDesiredMip[textureId], desiredMip);
@@ -140,11 +142,12 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // 6. 計算該命令在陣列中的字節偏移量并寫回
     uint32_t allCountersSize = kMaxBatchCount * 4; // 128 字節
-    uint32_t cmdByteOffset = allCountersSize + absoluteSlot * 20; // 20 字節/命令
+    uint32_t cmdByteOffset = allCountersSize + absoluteSlot * 16; // 16 字節/命令 (VkDrawIndirectCommand)
 
-    gIndirectArgsBuffer.Store(cmdByteOffset + 0, instance.indexCount);
-    gIndirectArgsBuffer.Store(cmdByteOffset + 4, 1); 
-    gIndirectArgsBuffer.Store(cmdByteOffset + 8, 0); 
-    gIndirectArgsBuffer.Store(cmdByteOffset + 12, 0); 
-    gIndirectArgsBuffer.Store(cmdByteOffset + 16, instanceIndex); 
+    VkDrawIndirectCommand cmd;
+    cmd.vertexCount    = instance.indexCount;
+    cmd.instanceCount  = 1;
+    cmd.firstVertex    = 0;
+    cmd.firstInstance  = instanceIndex;
+    gIndirectArgsBuffer.Store<VkDrawIndirectCommand>(cmdByteOffset, cmd); 
 }
