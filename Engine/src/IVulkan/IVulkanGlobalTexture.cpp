@@ -73,6 +73,7 @@ namespace INVENT
 
 		_upload_pool->Start();
 
+		_max_used_slot = 0;
 		_init_default_image();
 
 		_is_valid = true;
@@ -241,8 +242,10 @@ namespace INVENT
 		}
 
 		_bit_vector_used.SetValue<true>(handle);
-
-		return { static_cast<std::uint32_t>(handle.GetRealIndex()) };
+		auto currentIndex = static_cast<std::uint32_t>(handle.GetRealIndex());
+		// 记录已使用最大 slot
+		if (_max_used_slot < currentIndex) _max_used_slot = currentIndex;
+		return { currentIndex };
 	}
 
 	IVulkanTexture2DManagement::Texture2DHandle IVulkanTexture2DManagement::AddTexture2D(const std::string& name, const std::string& path,
@@ -484,8 +487,10 @@ namespace INVENT
 		IVulkanBase::Base().UseVmaInvalidateAllocationBuffer(_mip_readback_buffers[frame_index]);
 		const std::uint32_t* fb = static_cast<const std::uint32_t*>(_mip_readback_mapped[frame_index]);
 
-		const size_t count = std::min(_stream_states_count, static_cast<size_t>(_mip_feedback_count));
-		for (std::uint32_t slot = 0; slot < count; ++slot)
+		//const size_t count = std::min(_stream_states_count, static_cast<size_t>(_mip_feedback_count));
+		//INVENT_LOG_DEBUG(std::format("count : {}.", count));
+		const size_t count = static_cast<size_t>(_max_used_slot);
+		for (std::uint32_t slot = 0; slot <= count; ++slot)
 		{
 			auto& s = _stream_states[slot];
 			if (s.Destroyed.load(std::memory_order_relaxed)) continue;

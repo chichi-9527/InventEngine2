@@ -419,6 +419,8 @@ namespace INVENT
 
 		TextureResidentChangedCallback _resident_changed_callback;
 
+		std::uint32_t _max_used_slot{ 0 };
+
 		// ===== 策略参数 =====
 		std::uint32_t _demote_hysteresis = 2;			// 降级滞后层数 (防抖)
 		std::uint32_t _demote_per_frame = 4;			// 每帧降级上限
