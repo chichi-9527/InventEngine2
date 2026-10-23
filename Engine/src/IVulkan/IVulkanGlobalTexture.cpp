@@ -493,6 +493,7 @@ namespace INVENT
 			const std::uint32_t total = s.TotalMips.load(std::memory_order_acquire);
 			if (total == 0) continue;
 
+			// 需要下降的层级数
 			const std::uint32_t desiredRaw = fb[slot];
 			if (desiredRaw == UINT32_MAX)
 			{
@@ -509,7 +510,8 @@ namespace INVENT
 			}
 			_unreferenced_frames[slot] = 0;
 
-			const std::uint32_t desired = std::min(desiredRaw, total - 1);
+			// shader 写回的是 mip 下降级数（分辨率无关），换算为绝对 mip 等级
+			const std::uint32_t desired = (desiredRaw < total) ? (total - 1 - desiredRaw) : 0;
 			s.DesiredMip.store(desired, std::memory_order_relaxed);
 
 			const std::uint32_t resident = s.ResidentBase.load(std::memory_order_relaxed);
