@@ -107,6 +107,7 @@ namespace INVENT
 			std::uint32_t indexCount{ 0 };
 			VkDeviceAddress vertexAddress{ 0 };
 			VkDeviceAddress indexAddress{ 0 };
+			bool use32BitIndex{ false };
 			bool IsValid() const
 			{
 				return recordIndex != INVALID_HANDLE;

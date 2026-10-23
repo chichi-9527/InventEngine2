@@ -106,7 +106,7 @@ namespace INVENT
 
 		if (vertices == nullptr || vertex_count == 0 || indices == nullptr || index_count == 0) return {};
 
-		const bool indexSizeUse32 = (index_count > 65536u);
+		const bool indexSizeUse32 = (vertex_count > 65535u);
 
 		IBuffer<IVertex>* useVBuffer = nullptr;
 		for (auto* vertexBuffer : _vertex_buffers)
@@ -440,12 +440,14 @@ namespace INVENT
 			const auto& d = rec->index16Buffer->_get_datas()[rec->vertexHandle];
 			h.indexAddress = d.BaseAddress;
 			h.indexCount = d.Count;
+			h.use32BitIndex = false;
 		}
 		else if (rec->index32Buffer && rec->indexHandle != IBaseBuffer::INVALID_VHANDLE)
 		{
 			const auto& d = rec->index32Buffer->_get_datas()[rec->vertexHandle];
 			h.indexAddress = d.BaseAddress;
 			h.indexCount = d.Count;
+			h.use32BitIndex = true;
 		}
 		else
 		{
