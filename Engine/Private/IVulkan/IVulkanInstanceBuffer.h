@@ -30,7 +30,8 @@ namespace INVENT
 			NoUse = 0,
 			UseUV = 1 << 0,
 			ShowInstance = 1 << 1,
-			AllMarerialTexIsDeffuse = 1 << 2
+			AllMarerialTexIsDeffuse = 1 << 2,
+			Use32BitIndex = 1 << 3
 		};
 		struct alignas(16) InstanceData
 		{
