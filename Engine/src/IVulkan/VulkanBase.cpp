@@ -273,11 +273,30 @@ namespace INVENT
 		VkPhysicalDeviceFeatures deviceFeatures{};
 		deviceFeatures.samplerAnisotropy = VK_TRUE; // 允許紋理採樣器開啟各向異性過濾
 
+		VkPhysicalDevice16BitStorageFeatures bit16Features{};
+		bit16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
+
+		VkPhysicalDeviceFeatures2 deviceFeatures2{};
+		deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		deviceFeatures2.pNext = &bit16Features;
+		vkGetPhysicalDeviceFeatures2(_physical_device, &deviceFeatures2);
+
 		VkPhysicalDeviceVulkan13Features features13{};
 		features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
 		features13.dynamicRendering = VK_TRUE;      // 开启动态渲染
 		features13.synchronization2 = VK_TRUE;      // 开启同步2
-
+		if (bit16Features.storageBuffer16BitAccess == VK_TRUE &&
+			bit16Features.storageInputOutput16 == VK_TRUE)
+		{
+			INVENT_LOG_INFO("硬件支持 16 位 shader.");
+			features13.pNext = &bit16Features;			// 开启 16 位 shader
+			_is_physical_device_16bit = true;
+		}
+		else
+		{
+			INVENT_LOG_WARNING("硬件不支持 16 位 shader.");
+		}
+		
 		VkPhysicalDeviceVulkan12Features feat12{};
 		feat12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
 		feat12.descriptorBindingPartiallyBound = VK_TRUE; // 部分綁定描述符
@@ -286,6 +305,7 @@ namespace INVENT
 		feat12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE; // 綁定後更新
 		feat12.descriptorBindingVariableDescriptorCount = VK_TRUE;
 		feat12.bufferDeviceAddress = VK_TRUE; // 开启Buffer设备地址
+		feat12.drawIndirectCount = VK_TRUE;
 		feat12.pNext = &features13;
 
 		VkPhysicalDeviceVulkan11Features feat11 = {};
@@ -614,7 +634,7 @@ namespace INVENT
 		uboLayoutBinding.binding = 0;
 		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		uboLayoutBinding.descriptorCount = 1;
-		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 		uboLayoutBinding.pImmutableSamplers = nullptr;
 		// binding 1 : point light ssbo
 		VkDescriptorSetLayoutBinding pointLightSSBOLayoutBinding{};
@@ -628,14 +648,14 @@ namespace INVENT
 		instanceDataSSBOLayoutBinding.binding = 2;
 		instanceDataSSBOLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		instanceDataSSBOLayoutBinding.descriptorCount = 1;
-		instanceDataSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // 頂點和計算著色器都需要
+		instanceDataSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // 頂點和計算著色器都需要
 
 		// binding 3 : 間接繪製命令緩衝區 SSBO (Compute 寫入，Render 讀取)
 		VkDescriptorSetLayoutBinding indirectCommandSSBOLayoutBinding{};
 		indirectCommandSSBOLayoutBinding.binding = 3;
 		indirectCommandSSBOLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		indirectCommandSSBOLayoutBinding.descriptorCount = 1;
-		indirectCommandSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT; // 主要由 Compute Shader 寫入
+		indirectCommandSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // 主要由 Compute Shader 寫入
 
 		// binding 4 : 纹理流式 mip 反馈 SSBO
 		// 视锥裁剪 CS InterlockedMin 写 -> 帧末拷 readback -> CPU 下下帧读
@@ -681,7 +701,8 @@ namespace INVENT
 		};
 
 		VkPushConstantRange pushConstantRange{};
-		pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		_push_constant_stage_flags = VK_SHADER_STAGE_COMPUTE_BIT;
+		pushConstantRange.stageFlags = _push_constant_stage_flags;
 		pushConstantRange.offset = 0;
 		pushConstantRange.size = sizeof(IVulkan::PushConstants);
 

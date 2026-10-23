@@ -188,6 +188,7 @@ namespace INVENT
 		VkFormat GetSwapChainImageFormat() const { return _swap_chain_image_format; }
 		VkFormat GetDepthFormat() const { return _depth_format; }
 		VkFormat GetShadowDepthFormat() const { return _shadow_depth_format; }
+		VkShaderStageFlags GetPushConstantStageFlags() const { return _push_constant_stage_flags; }
 		VkInstance GetVkInstance() const { return _instance; }
 		VkDevice GetDevice() const { return _device; }
 		VkSwapchainKHR GetSwapChain() const { return _swap_chain; }
@@ -203,6 +204,7 @@ namespace INVENT
 		VkPipelineLayout GetVkPipelineLayout() const { return _global_pipeline_layout; }
 		const std::uint32_t GetAPIVersion() const noexcept { return _api_version; }
 		bool Version_1_3_OrHigher() const noexcept { return _api_version >= VK_API_VERSION_1_3; }
+		bool Is16BitPhysicalSupport() const { return _is_physical_device_16bit; }
 		std::mutex& GetQueueMutex() { return _queue_mutex; }
 	private:
 		const std::uint32_t _use_lastest_api_version();
@@ -254,6 +256,7 @@ namespace INVENT
 		QueueFamilyIndices _queue_family_indices{};
 		VkExtent2D _swap_chain_extent{};
 
+		VkShaderStageFlags _push_constant_stage_flags{ VK_SHADER_STAGE_COMPUTE_BIT };
 		VkFormat _swap_chain_image_format{ VK_FORMAT_UNDEFINED };
 		VkImageUsageFlags _swap_chain_image_usages{ VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT };
 		VkFormat _depth_format{ VK_FORMAT_UNDEFINED };
@@ -264,6 +267,8 @@ namespace INVENT
 		std::uint32_t _absolute_descriptor_limit{ 0 };
 
 		std::mutex _queue_mutex; // VkQueue 锁
+
+		bool _is_physical_device_16bit{ false };
 
 	};
 
