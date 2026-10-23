@@ -24,6 +24,8 @@ namespace INVENT
 		INVENT_API void ChangeWindowSize(std::uint32_t width, std::uint32_t height);
 		INVENT_API std::uint32_t GetWindowWidth() const { return _window_width; }
 		INVENT_API std::uint32_t GetWindowHeight() const { return _window_height; }
+		// 宽高比，高度为 0 时也返回 0.0f
+		INVENT_API float GetWindowAspectRatio() const;
 
 		std::atomic_bool& GetWindowSizeResized();
 		std::atomic_bool& GetEngineShouldExit();

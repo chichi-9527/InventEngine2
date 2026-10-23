@@ -37,6 +37,13 @@ namespace INVENT
 		_window_size_resized.store(true, std::memory_order_release);
 	}
 
+	float IEngine::GetWindowAspectRatio() const
+	{
+		return _window_height ?
+			static_cast<float>(_window_width) / static_cast<float>(_window_height) :
+			0.0f;
+	}
+
 	std::atomic_bool& IEngine::GetWindowSizeResized()
 	{
 		return _window_size_resized;
