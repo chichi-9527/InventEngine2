@@ -1,5 +1,4 @@
-
-file(GLOB_RECURSE EDITOR_SRCS "src/*.cpp")
+﻿file(GLOB_RECURSE EDITOR_SRCS "src/*.cpp")
 file(GLOB_RECURSE EDITOR_INCS "src/*.h")
 file(GLOB_RECURSE IMGUI_FILES
     "Imgui_1_92_8/*.h"
@@ -59,6 +58,8 @@ target_link_libraries(EngineEditor
     PRIVATE glfw
     PRIVATE yaml-cpp
     PRIVATE ${GLOBAL_VULKAN_SDK_LIB}/vulkan-1.lib
+    PRIVATE $<$<CONFIG:Debug>:${GLOBAL_VULKAN_SDK_LIB}/SDL2d.lib>
+    PRIVATE $<$<NOT:$<CONFIG:Debug>>:${GLOBAL_VULKAN_SDK_LIB}/SDL2.lib>
     PRIVATE ${LUA_DIR}/lib/lua54.lib
 )
 
@@ -96,6 +97,10 @@ add_custom_command(TARGET EngineEditor POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${GLOBAL_VULKAN_SDK_BIN}/slang-glslang.dll"
     "$<TARGET_FILE_DIR:EngineEditor>/slang-glslang.dll"
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<IF:$<CONFIG:Debug>,${GLOBAL_VULKAN_SDK_BIN}/SDL2d.dll,${GLOBAL_VULKAN_SDK_BIN}/SDL2.dll>"
+    "$<IF:$<CONFIG:Debug>,$<TARGET_FILE_DIR:EngineEditor>/SDL2d.dll,$<TARGET_FILE_DIR:EngineEditor>/SDL2.dll>"
 
     # copy dll files to EngineEditor directory
     COMMAND ${CMAKE_COMMAND} -E copy_directory
