@@ -20,6 +20,10 @@
 #include <GLFW/glfw3native.h>
 #endif // _WIN32
 
+#include <imgui.h>
+#include <imgui_impl_sdl2.h>
+#include <imgui_impl_vulkan.h>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -48,26 +52,54 @@ namespace Editor
     CreateGameModuleFunc  pfnCreateGame = nullptr;
     DestroyGameModuleFunc pfnDestroyGame = nullptr;
     IGameModule* GameModuleInstance = nullptr;
+
+
+    static std::vector<ImDrawData*> CapturedDrawDatas;
+    static ImGuiContext* ImguiContext = nullptr;
+
+    static void CopyImDrawData(ImDrawData*& dst, const ImDrawData* src)
+    {
+        if (!src || !src->Valid) return;
+
+        // 逐字段手动拷贝 ImDrawData，但不拷贝 CmdLists（避免混入 ImGui 内部指针）
+        dst->Valid = src->Valid;
+        dst->TotalIdxCount = src->TotalIdxCount;
+        dst->TotalVtxCount = src->TotalVtxCount;
+        dst->DisplayPos = src->DisplayPos;
+        dst->DisplaySize = src->DisplaySize;
+        dst->FramebufferScale = src->FramebufferScale;
+        dst->OwnerViewport = src->OwnerViewport;
+        dst->Textures = src->Textures;
+
+        // 深拷贝每个 ImDrawList，只将克隆的列表加入 CmdLists
+        for (int i = 0; i < src->CmdListsCount; i++)
+        {
+            ImDrawList* cloned_list = IM_NEW(ImDrawList)(src->CmdLists[i]->_Data);
+            cloned_list->CmdBuffer = src->CmdLists[i]->CmdBuffer;
+            cloned_list->IdxBuffer = src->CmdLists[i]->IdxBuffer;
+            cloned_list->VtxBuffer = src->CmdLists[i]->VtxBuffer;
+            cloned_list->Flags = src->CmdLists[i]->Flags;
+
+            dst->CmdLists.push_back(cloned_list);
+        }
+
+        // 确保 CmdListsCount 与实际 Size 一致
+        dst->CmdListsCount = dst->CmdLists.Size;
+    }
 }
 
 bool EditorWindow::Start()
 {
     INVENT::IEngine::Instatnce().Init();
     if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
-    
+    Editor::ImguiContext = ImGui::CreateContext();
+    Editor::CapturedDrawDatas.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), nullptr);
+
     //
     if (!GetGameProjects())
     {
         return false;
     }
-//#if !WITH_EDITOR
-    if (!LoadGame())
-    {
-        return false;
-    }
-
-    Begin();
-//#endif
 
     if (!_get_and_set_required_instance_extensions()) return false;
     // start render loop
@@ -77,14 +109,129 @@ bool EditorWindow::Start()
             return glfwCreateWindowSurface(instance, IWindow::_glfw_window, allocator, surface);
         }
     );
+    INVENT::IRenderThreadBase::Instance().SetImguiVkInitFunction(
+        [](const INVENT::IRenderThreadBase::ImguiVkInitInfo& info)->bool {
+            if (Editor::ImguiContext)
+            {
+                ImGui::SetCurrentContext(Editor::ImguiContext);
+            }
+            else
+            {
+                INVENT_LOG_ERROR("[Editor] Imgui context is nullptr!");
+                return false;
+            }
+
+            // 1. 填充官方要求的初始化資訊
+            ImGui_ImplVulkan_InitInfo init_info{};
+            init_info.Instance = info.instance;
+            init_info.PhysicalDevice = info.physicalDevice;
+            init_info.Device = info.logicalDevice;
+            init_info.QueueFamily = info.queueFamilyIndex;
+            init_info.Queue = info.graphicsQueue;
+            init_info.DescriptorPool = info.imguiDescriptorPool;
+            init_info.MinImageCount = info.minImageCount;
+            init_info.ImageCount = info.imageCount;
+            init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+            // 2. 關鍵：設定 Vulkan 1.3 動態渲染
+            init_info.UseDynamicRendering = true;
+
+            static VkFormat color_format;
+            color_format = info.colorAttachmentFormat;
+
+            init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+            init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+            init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &color_format;
+            init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat = info.depthAttachmentFormat;
+            init_info.PipelineInfoMain.PipelineRenderingCreateInfo.stencilAttachmentFormat = info.stencilAttachmentFormat;
+
+            return ImGui_ImplVulkan_Init(&init_info);
+        }
+    );
+    INVENT::IRenderThreadBase::Instance().SetImguiVkShutdownFunction(
+        []() {
+            ImGui::SetCurrentContext(Editor::ImguiContext);
+            ImGui_ImplVulkan_Shutdown();
+        }
+    );
+    INVENT::IRenderThreadBase::Instance().SetImguiNewFrameFunc(
+        []() {
+            ImGui::SetCurrentContext(Editor::ImguiContext);
+
+            ImGui_ImplVulkan_NewFrame();
+            auto& engine = INVENT::IEngine::Instatnce();
+            ImGui::GetIO().DisplaySize = ImVec2(static_cast<float>(engine.GetWindowWidth()), static_cast<float>(engine.GetWindowHeight()));
+
+            ImGui::NewFrame();
+
+            //ImGui::ShowDemoWindow();
+
+            ImGui::Begin("GPU-Driven Editor");
+            if (ImGui::Button("Reset Indirect Buffers"))
+            {
+                // todo
+            }
+            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+            ImGui::End();
+        }
+    );
+    INVENT::IRenderThreadBase::Instance().SetImguiEndFrameAndFetchDataFunc(
+        [](std::uint32_t frame_index)->void* {
+            ImGui::SetCurrentContext(Editor::ImguiContext);
+
+            ImGui::Render();
+            ImDrawData* rawData = ImGui::GetDrawData();
+
+            if (Editor::CapturedDrawDatas.empty()) return nullptr;
+
+            ImDrawData* frameDrawData = Editor::CapturedDrawDatas[frame_index];
+            if (frameDrawData)
+            {
+                auto& CmdLists = frameDrawData->CmdLists;
+                for (int i = 0; i < CmdLists.Size; i++)
+                {
+                    IM_DELETE(CmdLists[i]);
+                }
+                IM_DELETE(frameDrawData);
+                Editor::CapturedDrawDatas[frame_index] = nullptr;
+            }
+
+            Editor::CapturedDrawDatas[frame_index] = IM_NEW(ImDrawData)();
+            Editor::CopyImDrawData(Editor::CapturedDrawDatas[frame_index], rawData);
+
+            return static_cast<void*>(Editor::CapturedDrawDatas[frame_index]);
+        }
+    );
+    INVENT::IRenderThreadBase::Instance().SetImguiRenderDrawDataFunc(
+        [](VkCommandBuffer cmd, void* pCapturedDrawData) {
+            ImGui::SetCurrentContext(Editor::ImguiContext);
+            //INVENT_LOG_DEBUG("ImguiRenderDrawData.");
+
+            if (!pCapturedDrawData) return;
+            ImDrawData* drawData = static_cast<ImDrawData*>(pCapturedDrawData);
+            ImGui_ImplVulkan_RenderDrawData(drawData, cmd);
+        }
+    );
+    
     INVENT::IEngine::Instatnce().ChangeWindowSize(this->_window_size.Width, this->_window_size.Height);
-    if (!INVENT::IRenderThreadBase::Instance().Start())
+    if (!INVENT::IRenderThreadBase::Instance().Init()) // init imgui
     {
+        INVENT::IRenderThreadBase::Instance().Shutdown();
         Terminate();
         return false;
     }
 
-    
+    if (!INVENT::IRenderThreadBase::Instance().Start())
+    {
+        INVENT::IRenderThreadBase::Instance().Shutdown();
+        Terminate();
+        return false;
+    }
+
+    if (!LoadGame())
+    {
+        return false;
+    }
+    Begin();
 
     float deltaTime = 0.0f;
     auto lastFrame = std::chrono::high_resolution_clock::now();
@@ -103,6 +250,23 @@ bool EditorWindow::Start()
 
     INVENT::IEngine::Instatnce().EngineExit();
     INVENT::IRenderThreadBase::Instance().Shutdown();
+
+    // delete imgui
+    for (auto frameDrawData : Editor::CapturedDrawDatas)
+    {
+        if (frameDrawData)
+        {
+            auto& CmdLists = frameDrawData->CmdLists;
+            for (int i = 0; i < CmdLists.Size; i++)
+            {
+                IM_DELETE(CmdLists[i]);
+            }
+            IM_DELETE(frameDrawData);
+        }
+    }
+    Editor::CapturedDrawDatas.clear();
+    ImGui::DestroyContext(Editor::ImguiContext);
+
 //#if !WITH_EDITOR
     End();
     UnLoadGame();
@@ -230,16 +394,35 @@ void EditorWindow::_framebuffer_size_callback(int width, int height)
 }
 
 void EditorWindow::_register_key_callback(int key, int scancode, int action, int mods)
-{}
+{
+
+}
 
 void EditorWindow::_cursor_position_callback(double xpos, double ypos)
-{}
+{
+    // imgui
+    ImGui::GetIO().AddMousePosEvent(static_cast<float>(xpos), static_cast<float>(ypos));
+}
 
 void EditorWindow::_mouse_button_callback(int button, int action, int mods)
-{}
+{
+
+    // imgui
+    ImGuiIO& io = ImGui::GetIO();
+    int imgui_button = 0;
+    if (button == GLFW_MOUSE_BUTTON_LEFT) imgui_button = 0;
+    if (button == GLFW_MOUSE_BUTTON_RIGHT) imgui_button = 1;
+    if (button == GLFW_MOUSE_BUTTON_MIDDLE) imgui_button = 2;
+    io.AddMouseButtonEvent(imgui_button, action == GLFW_PRESS);
+}
 
 void EditorWindow::_scroll_callback(double xoffset, double yoffset)
-{}
+{
+
+    // imgui
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMouseWheelEvent((float)xoffset, (float)yoffset);
+}
 
 void EditorWindow::_cursor_enter_callback(int entered)
 {}

@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include "ImguiConfig.h"
+
 #include <vulkan/vulkan.h>
 
 #include <vector>
@@ -34,6 +36,9 @@ namespace INVENT
 		static void RenderFrame(std::uint32_t frameindex);
 		static void EndRender();
 
+		static void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func) { _imgui_new_frame_func = func; }
+		static void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func) { _imgui_end_frame_and_fetch_func = func; }
+		static void SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func) { _imgui_draw_data_func = func; }
 		static void SetClearColor(VkClearColorValue v) { _vk_clear.color = v; }
 	private:
 		static bool _init_buffers();			// ubo(预留) + 测试实例 + 占位 ssbo
@@ -43,6 +48,7 @@ namespace INVENT
 		static bool _init_test_resources();	// 全局采样器 + set1 + 测试纹理
 		static void _record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present);
 		static void _record_depth_barrier(VkCommandBuffer cmd, VkImage depth_image);
+		static void _imgui_barrier(VkCommandBuffer cmd, VkImage image);
 		static void _write_buffer_binding(VkDescriptorSet set, std::uint32_t binding, VkBuffer buffer, bool is_ubo);
 		static void _upload_per_frame_data(std::uint32_t frame_index);
 		static bool _recreate_swapchain();
@@ -85,6 +91,11 @@ namespace INVENT
 		inline static std::uint32_t _current_frame{ 0 };	// EndRender 用
 		inline static bool _frame_skipped{ false };
 		inline static bool _swapchain_dirty{ false };
-		inline static std::uint64_t _debug_frame{ 0 };
+
+		// imgui
+		inline static IImgui::ImguiNewFrameFunc _imgui_new_frame_func = nullptr;
+		inline static IImgui::ImguiEndFrameAndFetchDataFunc _imgui_end_frame_and_fetch_func = nullptr;
+		inline static IImgui::ImguiRenderDrawDataFunc _imgui_draw_data_func = nullptr;
+		inline static void* _imgui_frame_data = nullptr;
 	};
 }

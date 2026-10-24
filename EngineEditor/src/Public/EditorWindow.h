@@ -32,4 +32,7 @@ protected:
 private:
 	static std::string _get_dll_path();
 	bool _get_and_set_required_instance_extensions();
+
+private:
+	
 };

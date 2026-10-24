@@ -440,6 +440,17 @@ namespace INVENT
 		}
 		vkResetFences(device, 1, &_frame_fences[frameindex]);
 
+		// imgui
+		if (_imgui_new_frame_func)
+		{
+			_imgui_new_frame_func();
+		}
+		_imgui_frame_data = nullptr;
+		if (_imgui_end_frame_and_fetch_func)
+		{
+			_imgui_frame_data = _imgui_end_frame_and_fetch_func(frameindex);
+		}
+
 		// 
 		_upload_per_frame_data(frameindex);
 
@@ -558,13 +569,43 @@ namespace INVENT
 		ri.pDepthAttachment = &depth;
 
 		vkCmdBeginRendering(cmd, &ri);
-		//vkCmdDraw(cmd, 6, 1, 0, 0);		// 手动顶点拉取: 6 顶点 = quad
+		
 		vkCmdDrawIndirectCount(cmd,
 			_draw_count_and_indirect_buffers[frameindex].buffer, sizeof(uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT,
 			_draw_count_and_indirect_buffers[frameindex].buffer, 0,
 			IVulkan::EXPECTED_INSTANCE_SIZE,
 			sizeof(VkDrawIndirectCommand));
 		vkCmdEndRendering(cmd);
+
+		// draw imgui
+		if (_imgui_draw_data_func && _imgui_frame_data)
+		{
+			//INVENT_LOG_DEBUG("draw imgui.");
+
+			_imgui_barrier(cmd, swapImage);
+			VkRenderingAttachmentInfo uiColor{};
+			uiColor.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+			uiColor.imageView = base.GetSwapChainImageViews()[_image_index]; // 相同的 Swapchain View
+			uiColor.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			uiColor.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;     // 關鍵：LOAD！保留 3D 間接渲染畫出的場景
+			uiColor.storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // 儲存最終包含 UI 的畫面
+
+			VkRenderingInfo uiRenderingInfo{};
+			uiRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+			uiRenderingInfo.renderArea = { {0, 0}, extent };
+			uiRenderingInfo.layerCount = 1;
+			uiRenderingInfo.colorAttachmentCount = 1;
+			uiRenderingInfo.pColorAttachments = &uiColor;
+			uiRenderingInfo.pDepthAttachment = nullptr;       // 關鍵：不傳深度，UI 永遠置頂
+
+			// 3. 開啟 ImGui 的動態渲染 Pass
+			vkCmdBeginRendering(cmd, &uiRenderingInfo);
+			if (_imgui_frame_data)
+			{
+				_imgui_draw_data_func(cmd, _imgui_frame_data);
+			}
+			vkCmdEndRendering(cmd);
+		}
 
 		// 5) COLOR_ATTACHMENT -> PRESENT_SRC
 		_record_swapchain_barrier(cmd, swapImage, true);
@@ -620,13 +661,6 @@ namespace INVENT
 			IEngine::Instatnce().GetWindowSizeResized().store(false, std::memory_order_release);
 		}
 
-		// 验证输出
-		if (++_debug_frame % 60 == 0)
-		{
-			INVENT_LOG_TRACE(std::format("[IVulkanRenderer] frame {}: resident mip = {}.",
-				_debug_frame, IVulkanTexture2DManagement::Instance().GetResidentMipLevel(
-					{ _test_texture_slot })));
-		}
 	}
 
 	void IVulkanRenderer::_record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present)
@@ -691,6 +725,28 @@ namespace INVENT
 		di.pImageMemoryBarriers = &b;
 
 		vkCmdPipelineBarrier2(cmd, &di);
+	}
+
+	void IVulkanRenderer::_imgui_barrier(VkCommandBuffer cmd, VkImage image)
+	{
+		VkImageMemoryBarrier2 image_barrier{};
+		image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+		image_barrier.pNext = nullptr;
+		image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+		image_barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+		image_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+		image_barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+		image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		image_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // 佈局保持不變
+		image_barrier.image = image; // 你的真實 SwapChain Image 物件
+		image_barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+		VkDependencyInfo dependency_info{};
+		dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+		dependency_info.imageMemoryBarrierCount = 1;
+		dependency_info.pImageMemoryBarriers = &image_barrier;
+
+		vkCmdPipelineBarrier2(cmd, &dependency_info);
 	}
 
 	void IVulkanRenderer::Shutdown()

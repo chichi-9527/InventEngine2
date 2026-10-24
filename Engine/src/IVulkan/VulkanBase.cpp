@@ -626,6 +626,34 @@ namespace INVENT
 		return true;
 	}
 
+	bool IVulkanBase::CreateImguiDescriptorPool()
+	{
+		VkDescriptorPoolSize pool_sizes[] = { { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+				{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+				{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+				{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+				{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 } };
+		VkDescriptorPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+		poolInfo.maxSets = 1000;
+		poolInfo.poolSizeCount = (uint32_t)std::size(pool_sizes);
+		poolInfo.pPoolSizes = pool_sizes;
+		if (VkResult result = vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_imgui_descriptor_pool))
+		{
+			INVENT_LOG_ERROR(std::format("[VulkanBase] Failed to create imgui descriptor pool! VkResult: {}.", static_cast<int32_t>(result)));
+			return false;
+		}
+
+		return true;
+	}
+
 	bool IVulkanBase::CreateGlobalPipelineLayout()
 	{
 		// Set0 
@@ -842,6 +870,11 @@ namespace INVENT
 		{
 			vkDestroyDescriptorPool(_device, _other_descriptor_pool, nullptr);
 			_other_descriptor_pool = VK_NULL_HANDLE;
+		}
+		if (_imgui_descriptor_pool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(_device, _imgui_descriptor_pool, nullptr);
+			_imgui_descriptor_pool = VK_NULL_HANDLE;
 		}
 
 		// 6. 銷毀 Pipeline Layout 與 Descriptor Set Layouts

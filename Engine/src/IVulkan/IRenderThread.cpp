@@ -4,6 +4,7 @@
 #include "IVulkan/VulkanBase.h"
 #include "IVulkan/IVulkanRenderer.h"
 #include "IVulkan/VulkanConfig.h"
+#include "IRenderThreadBase.h"
 
 namespace INVENT
 {
@@ -13,15 +14,37 @@ namespace INVENT
 		return r;
 	}
 
+	void IRenderThread::SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func)
+	{
+		IVulkanRenderer::SetImguiNewFrameFunc(func);
+	}
+
+	void IRenderThread::SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func)
+	{
+		IVulkanRenderer::SetImguiEndFrameAndFetchDataFunc(func);
+	}
+
+	void IRenderThread::SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func)
+	{
+		IVulkanRenderer::SetImguiRenderDrawDataFunc(func);
+	}
+
+	bool IRenderThread::Init()
+	{
+		if (!_init_vulkan() ||
+			!_init_imgui())
+		{
+			_is_imgui_init_success = false;
+			return false;
+		}
+		return true;
+	}
+
 	bool IRenderThread::Start()
 	{
 		if (_running.exchange(true)) return false;
 
-		if (!_init_vulkan())
-		{
-			_running = false;
-			return false;
-		}
+		
 		if (!IVulkanRenderer::Init())
 		{
 			INVENT_LOG_ERROR("[IRenderThread] Init Vulkan renderer error.");
@@ -39,6 +62,11 @@ namespace INVENT
 			_thread.join();		// 渲染线程退出后才能销毁 Vulkan 资源
 		IVulkanRenderer::Shutdown();
 		INVENT_LOG_INFO("[IRenderThread] shutdown.");
+
+		if (_imgui_shutdown_func)
+		{
+			_imgui_shutdown_func();
+		}
 		_shutdown_vulkan();
 	}
 
@@ -104,9 +132,39 @@ namespace INVENT
 		}
 	}
 
+	bool IRenderThread::_init_imgui()
+	{
+		if (_imgui_init_func)
+		{
+			auto& base = IVulkanBase::Base();
+			if (!base.CreateImguiDescriptorPool())
+			{
+				return false;
+			}
+			
+			ImguiVkInitInfo info{};
+			info.instance = base.GetVkInstance();
+			info.physicalDevice = base.GetPhysicalDevice();
+			info.logicalDevice = base.GetDevice();
+			info.graphicsQueue = base.GetGraphicsQueue();
+			info.queueFamilyIndex = base.GetQueueFamilyIndices().GraphicsFamily;
+			info.imguiDescriptorPool = base.GetImguiDsecriptorPool();
+			info.colorAttachmentFormat = base.GetSwapChainImageFormat();
+
+			_is_imgui_init_success = true;
+			return _imgui_init_func(info);
+		}
+		return true;
+	}
+
 	void IRenderThreadBase::SetVulkanInstanceExtension(const char* extension_name)
 	{
 		IVulkanBase::AddInstanceExtension(extension_name);
+	}
+
+	std::uint32_t IRenderThreadBase::MaxFrameInFlight() const noexcept
+	{
+		return IVulkan::MAX_FRAMES_IN_FLIGHT;
 	}
 
 }

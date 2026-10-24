@@ -76,6 +76,7 @@ namespace INVENT
 		bool InitDescriptorCounts();
 		bool CreateBindlessDescriptorPool();
 		bool CreateOtherDsecriptorPools();
+		bool CreateImguiDescriptorPool(); // 使用 imgui 时调用
 		bool CreateGlobalPipelineLayout();
 		bool AllocaGlobalBindlessDescriptorSet();
 		bool CreateCommandPool();
@@ -190,6 +191,7 @@ namespace INVENT
 		VkFormat GetShadowDepthFormat() const { return _shadow_depth_format; }
 		VkShaderStageFlags GetPushConstantStageFlags() const { return _push_constant_stage_flags; }
 		VkInstance GetVkInstance() const { return _instance; }
+		VkPhysicalDevice GetPhysicalDevice() const { return _physical_device; }
 		VkDevice GetDevice() const { return _device; }
 		VkSwapchainKHR GetSwapChain() const { return _swap_chain; }
 		const std::vector<VkImage>& GetSwapChainImages() const { return _swap_chain_images; }
@@ -197,6 +199,7 @@ namespace INVENT
 		VkImage GetDepthImage() const { return _depth_image; }
 		VkImageView GetDepthImageView() const { return _depth_image_view; }
 		VkExtent2D GetSwapChainExtent() const { return _swap_chain_extent; }
+		VkDescriptorPool GetImguiDsecriptorPool() const { return _imgui_descriptor_pool; }
 		VkDescriptorSet GetGlobalBindlessDescriptorSet() const { return _global_bindless_descriptor_set; }
 		const VkPhysicalDeviceProperties& GetPhysicalDeviceProperties() const { return _physical_device_properties; }
 		const VkPhysicalDeviceMemoryProperties& GetPhysicalDeviceMemoryProperties() const { return _physical_device_memory_properties; }
@@ -236,6 +239,7 @@ namespace INVENT
 		VkDebugUtilsMessengerEXT _debug_messenger = VK_NULL_HANDLE;
 		VkDescriptorPool _bindless_descriptor_pool = VK_NULL_HANDLE;
 		VkDescriptorPool _other_descriptor_pool = VK_NULL_HANDLE;
+		VkDescriptorPool _imgui_descriptor_pool = VK_NULL_HANDLE;
 		VkPipelineLayout _global_pipeline_layout = VK_NULL_HANDLE;
 		std::vector<VkDescriptorSetLayout> _descriptor_set_layouts;
 		VkDescriptorSet  _global_bindless_descriptor_set = VK_NULL_HANDLE;
