@@ -93,4 +93,9 @@ add_custom_command(TARGET EngineStarter POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/../Config/Shaders"
     "$<TARGET_FILE_DIR:EngineStarter>/Config/Shaders"
+
+    # 复制 EngineAssets 到 EngineStarter 目录
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/../Config/EngineAssets"
+    "$<TARGET_FILE_DIR:EngineStarter>/Config/EngineAssets"
 )
