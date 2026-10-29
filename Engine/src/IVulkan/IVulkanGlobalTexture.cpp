@@ -96,11 +96,14 @@ namespace INVENT
 		// 2) 槽位纹理 (流式窗口 image)
 		_bit_vector_used.FastForEachOne([this](size_t index) {
 			auto& tex = _textures[index];
-			if (tex.ImageView != VK_NULL_HANDLE)
-				IVulkanBase::Base().DestroyImageView(tex.ImageView);
-			if (tex.Image != VK_NULL_HANDLE)
+			if (!_stream_states[index].External.load(std::memory_order_relaxed))
 			{
-				TexMemManager::DestroyVkImage(tex.Image);
+				if (tex.ImageView != VK_NULL_HANDLE)
+					IVulkanBase::Base().DestroyImageView(tex.ImageView);
+				if (tex.Image != VK_NULL_HANDLE)
+				{
+					TexMemManager::DestroyVkImage(tex.Image);
+				}
 			}
 			tex = IVulkanTexture2DHandle{};
 			});
@@ -363,7 +366,7 @@ namespace INVENT
 		return handle;
 	}
 
-	void IVulkanTexture2DManagement::UpdateTexture2D(Texture2DHandle& handle, std::uint32_t needMipLevel)
+	void IVulkanTexture2DManagement::UpdateTexture2D(Texture2DHandle handle, std::uint32_t needMipLevel)
 	{
 		if (!handle.IsValid() || !_is_valid) return;
 		if (handle.slot >= _stream_states_count) return;
@@ -381,6 +384,34 @@ namespace INVENT
 		_request_retarget(handle.slot, needMipLevel);
 	}
 
+	void IVulkanTexture2DManagement::UpdateTexture2D(Texture2DHandle handle, VkImageView image_view)
+	{
+		if (!handle.IsValid() || image_view == VK_NULL_HANDLE || !_is_valid) return;
+		if (handle.slot >= _stream_states_count) return;
+		if (!handle.IsValid() || image_view == VK_NULL_HANDLE || !_is_valid) return;
+		if (handle.slot >= _stream_states_count) return;
+		auto& s = _stream_states[handle.slot];
+		if (s.Destroyed.load(std::memory_order_relaxed)) return;
+		// 流式槽位 (有 DDS 数据) 禁止外部 view: 避免半流式半外部的混合状态
+		if (s.TotalMips.load(std::memory_order_acquire) != 0)
+		{
+			INVENT_LOG_WARNING("[IVulkanTexture2DManagement] 流式纹理槽位不能绑定外部 imageView.");
+			return;
+		}
+		{
+			std::unique_lock<std::shared_mutex> lock(_textures_mutex);
+			auto& t = _textures[handle.slot];
+			if (t.ImageView == image_view)
+				return;		// 去重: view 未变化, 零成本 (无需每帧调用)
+			t.ImageView = image_view;
+			t.Image = VK_NULL_HANDLE;		// 外部槽位: 无自有 image
+			t.CurrentMaxMipLevel = 0;		// 语义: 外部 view 自带 mip 范围, "mip0 可用"
+		}
+		s.External.store(true, std::memory_order_relaxed);
+		// update-after-bind: 运行中的帧继续采样旧 view (调用方保证其存活), 新帧用新 view
+		IVulkanBase::Base().UpdateBindlessTextureSlot(handle.slot, image_view);
+	}
+
 	void IVulkanTexture2DManagement::DestroyTexture2D(Texture2DHandle handle)
 	{
 		if (!handle.IsValid() || handle.slot >= _stream_states_count) return;
@@ -394,7 +425,11 @@ namespace INVENT
 			std::unique_lock<std::shared_mutex> lock(_textures_mutex);
 			// GPU 资源走帧环延迟销毁 (in-flight 帧可能还在采样)
 			auto& t = _textures[handle.slot];
-			QueueDestroy(t.Image, t.ImageView);
+			if (!s.External.load(std::memory_order_relaxed))
+			{
+				QueueDestroy(t.Image, t.ImageView);		// 流式槽位: 帧环销毁
+			}
+			// 外部槽位: view 所有权归调用方, 不销毁 (调用方自行退役)
 			t = IVulkanTexture2DHandle{};
 
 			// CPU 侧 DDS 数据
@@ -424,6 +459,7 @@ namespace INVENT
 		s.DesiredMip.store(UINT32_MAX, std::memory_order_relaxed);
 		s.Pinned.store(false, std::memory_order_relaxed);
 		s.Destroyed.store(false, std::memory_order_relaxed);
+		s.External.store(false, std::memory_order_relaxed);
 		_unreferenced_frames[handle.slot] = 0;
 
 		_bit_vector_valid.SetValue<false>(IHandle{ handle.slot });
@@ -614,6 +650,8 @@ namespace INVENT
 	void IVulkanTexture2DManagement::_evict_texture(std::uint32_t slot)
 	{
 		auto& s = _stream_states[slot];
+
+		if (s.External.load(std::memory_order_relaxed)) return;	// 外部槽位免疫驱逐
 
 		VkImage img = VK_NULL_HANDLE;
 		VkImageView view = VK_NULL_HANDLE;
@@ -1481,6 +1519,7 @@ namespace INVENT
 			d.Generation.store(s.Generation.load(std::memory_order_relaxed));
 			d.Pinned.store(s.Pinned.load(std::memory_order_relaxed));
 			d.Destroyed.store(s.Destroyed.load(std::memory_order_relaxed));
+			d.External.store(s.External.load(std::memory_order_relaxed));
 		}
 		_stream_states = std::move(next);
 		_stream_states_count = count;

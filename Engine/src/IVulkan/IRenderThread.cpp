@@ -157,6 +157,11 @@ namespace INVENT
 		return true;
 	}
 
+	void IRenderThreadBase::OnViewportResize(std::uint32_t w, std::uint32_t h)
+	{
+		IVulkanRenderer::SetMainRTExtent(w, h);
+	}
+
 	void IRenderThreadBase::SetVulkanInstanceExtension(const char* extension_name)
 	{
 		IVulkanBase::AddInstanceExtension(extension_name);

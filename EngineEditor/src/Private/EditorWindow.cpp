@@ -23,6 +23,7 @@
 #include <imgui.h>
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_vulkan.h>
+#include <imgui_impl_glfw.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -32,7 +33,6 @@
 
 namespace Editor
 {
-#if WITH_EDITOR
     const constexpr char* RegistryPath = "Config/Projects/projects.yaml";
     struct GameProjectInfo {
         std::string name;
@@ -40,13 +40,6 @@ namespace Editor
     };
     static std::vector<GameProjectInfo> RegisteredProjects;
     static size_t GameIndex{ 0 };
-#else
-    const constexpr char* RegistryPath = "Config/GameConfig/game_config.yaml";
-    struct GameProjectInfo {
-        std::string name;
-    };
-    static GameProjectInfo GameInfo{};
-#endif // WITH_EDITOR
 
     HMODULE hGameDLL = nullptr;
     CreateGameModuleFunc  pfnCreateGame = nullptr;
@@ -55,6 +48,8 @@ namespace Editor
 
 
     static std::vector<ImDrawData*> CapturedDrawDatas;
+    static std::vector<VkImageView> CachedImageViews;
+    static std::vector<ImTextureID> ScenceTextureIDs;
     static ImGuiContext* ImguiContext = nullptr;
 
     static void CopyImDrawData(ImDrawData*& dst, const ImDrawData* src)
@@ -94,6 +89,8 @@ bool EditorWindow::Start()
     if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
     Editor::ImguiContext = ImGui::CreateContext();
     Editor::CapturedDrawDatas.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), nullptr);
+    Editor::CachedImageViews.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), VK_NULL_HANDLE);
+    Editor::ScenceTextureIDs.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), ImTextureID{ 0 });
 
     //
     if (!GetGameProjects())
@@ -162,22 +159,64 @@ bool EditorWindow::Start()
             ImGui::GetIO().DisplaySize = ImVec2(static_cast<float>(engine.GetWindowWidth()), static_cast<float>(engine.GetWindowHeight()));
 
             ImGui::NewFrame();
-
-            //ImGui::ShowDemoWindow();
-
-            ImGui::Begin("GPU-Driven Editor");
-            if (ImGui::Button("Reset Indirect Buffers"))
-            {
-                // todo
-            }
-            ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-            ImGui::End();
         }
     );
     INVENT::IRenderThreadBase::Instance().SetImguiEndFrameAndFetchDataFunc(
-        [](std::uint32_t frame_index)->void* {
+        [](std::uint32_t frame_index, void* image_view, void* sampler)->void* {
             ImGui::SetCurrentContext(Editor::ImguiContext);
 
+            VkImageView currentView = reinterpret_cast<VkImageView>(image_view);
+            VkSampler Sampler = reinterpret_cast<VkSampler>(sampler);
+
+            if (currentView != VK_NULL_HANDLE && Sampler != VK_NULL_HANDLE)
+            {
+                // 如果這一幀的 ImageView 變了
+                if (Editor::CachedImageViews[frame_index] != currentView)
+                {
+                    // 釋放舊的 ImGui 描述符（防止 Pool 記憶體爆炸）
+                    if (Editor::ScenceTextureIDs[frame_index] != 0)
+                    {
+                        ImGui_ImplVulkan_RemoveTexture(reinterpret_cast<VkDescriptorSet>(Editor::ScenceTextureIDs[frame_index]));
+                        Editor::ScenceTextureIDs[frame_index] = ImTextureID{ 0 };
+                    }
+
+                    VkDescriptorSet newSet = ImGui_ImplVulkan_AddTexture(Sampler, currentView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    Editor::ScenceTextureIDs[frame_index] = reinterpret_cast<ImTextureID>(newSet);
+                    Editor::CachedImageViews[frame_index] = currentView;
+                }
+            }
+
+            // ---- 繪製編輯器的 Scene Viewport ----
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::Begin("Scene Viewport");
+
+            ImVec2 viewportSize = ImGui::GetContentRegionAvail();
+            static ImVec2 lastSize = { 0, 0 };
+            if (viewportSize.x != lastSize.x || viewportSize.y != lastSize.y)
+            {
+                if (viewportSize.x > 0 && viewportSize.y > 0)
+                {
+                    INVENT::IRenderThreadBase::Instance().OnViewportResize(static_cast<std::uint32_t>(viewportSize.x), static_cast<std::uint32_t>(viewportSize.y));
+                    lastSize = viewportSize;
+
+                }
+            }
+
+            if (Editor::ScenceTextureIDs[frame_index] != ImTextureID{ 0 })
+            {
+                ImGui::Image(Editor::ScenceTextureIDs[frame_index], viewportSize, ImVec2(0, 0), ImVec2(1, 1));
+            }
+            else
+            {
+                ImGui::Text("Viewport Ready. Waiting for Engine Active Frame...");
+            }
+
+            ImGui::Button("If you see this, ImGui works!");
+
+            ImGui::End();
+            ImGui::PopStyleVar();
+
+            // 結束狀態機並執行深拷貝
             ImGui::Render();
             ImDrawData* rawData = ImGui::GetDrawData();
 
@@ -302,16 +341,12 @@ bool EditorWindow::GetGameProjects()
     try
     {
         YAML::Node root = YAML::LoadFile(Editor::RegistryPath);
-#if WITH_EDITOR
         for (const auto& node : root)
         {
             Editor::GameProjectInfo& proj = Editor::RegisteredProjects.emplace_back();
             proj.name = node["name"].as<std::string>();
             proj.path = node["path"].as<std::string>();
         }
-#else
-        GameInfo.name = root["name"].as<std::string>();
-#endif // WITH_EDITOR
     }
     catch (...)
     {
@@ -319,7 +354,6 @@ bool EditorWindow::GetGameProjects()
         return false;
     }
 
-#if WITH_EDITOR
     // 获取到全部游戏项目
     INVENT_LOG_INFO(std::format("[Editor] 获取到游戏项目数量: {}. 项目: ", Editor::RegisteredProjects.size()));
     std::uint32_t num = 0;
@@ -327,13 +361,6 @@ bool EditorWindow::GetGameProjects()
     {
         INVENT_LOG_INFO(std::format("\t {}. name : {}. path : {}", ++num, game.name, game.path));
     }
-#else
-    if (Editor::GameInfo.name.empty())
-    {
-        INVENT_LOG_ERROR(std::format("[Game] 找不到游戏文件 配置文件路径 : {}", Editor::RegistryPath));
-        return false;
-    }
-#endif
 
     return true;
 }
@@ -429,13 +456,9 @@ void EditorWindow::_cursor_enter_callback(int entered)
 
 std::string EditorWindow::_get_dll_path()
 {
-#if WITH_EDITOR
     const auto& game = Editor::RegisteredProjects[Editor::GameIndex];
     std::string path = game.path;
     std::string dllPath = path + "/lib/" + CURRENT_BUILD_CONFIG + "/" + game.name + ".dll";
-#else
-    std::string dllPath = std::string("./") + Editor::GameInfo.name + ".dll";
-#endif
 
     return dllPath;
 }

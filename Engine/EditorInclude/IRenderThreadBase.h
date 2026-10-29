@@ -44,6 +44,8 @@ namespace INVENT
 		virtual void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func) = 0;
 		virtual void SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func) = 0;
 
+		void OnViewportResize(std::uint32_t w, std::uint32_t h);
+
 		virtual bool Init() = 0;
 		virtual bool Start() = 0;
 		virtual void Shutdown() = 0;

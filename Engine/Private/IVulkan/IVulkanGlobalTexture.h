@@ -195,6 +195,7 @@ namespace INVENT
 			std::atomic<std::uint32_t> Generation{ 0 };				// 销毁/复用代数 (防止 DDS 工作线程在销毁后写入)
 			std::atomic<bool> Pinned{ false };						// 固定不驱逐
 			std::atomic<bool> Destroyed{ false };
+			std::atomic<bool> External{ false };					// 外部 view 槽位: view 所有权归调用方, 管理类不销毁
 		};
 
 		// 上传线程 -> 主线程 的完成项
@@ -235,6 +236,7 @@ namespace INVENT
 		// 在调用 IEngine::Shutdown() 之前调用
 		void Terminate();
 
+		// 返回占位纹理句柄，不会创建与上传 imageView，后续可通过 Update 自行上传
 		Texture2DHandle AllocateTextureHandle();
 		/// <param name="name"> 唯一纹理名,每次添加纹理会判断是否存在此纹理 </param>
 		/// <param name="path"> dds 文件路径,只会加载2d纹理的 BC1/3/4/5/6H/7 压缩方式的纹理,否则加载失败,但会返回有效句柄 </param>
@@ -246,7 +248,18 @@ namespace INVENT
 		/// 升级: 异步上传更精细的窗口; 明显变粗: 异步换更小的窗口; 都在后台完成
 		/// </summary>
 		/// <param name="needMipLevel"> 期望最精细虚拟 mip 层号 </param>
-		void UpdateTexture2D(Texture2DHandle& handle, std::uint32_t needMipLevel);
+		void UpdateTexture2D(Texture2DHandle handle, std::uint32_t needMipLevel);
+		/// <summary>
+		/// 绑定外部创建的 imageView (离屏渲染结果显示等) —— "外部渲染目标槽位"
+		///   - 所有权: image/view 归调用方, 管理类只登记绑定; DestroyTexture2D/Clear 不会销毁它
+		///   - 流式: 该槽位不参与流式 (无 DDS 数据), 免疫驱逐/升降级, 无材质驻留回调
+		///   - 时序: 首次 Update 之前采样该 slot = 未初始化描述符 (UB) ——
+		///     离屏 image/view 在渲染循环开始前创建并 Update 一次即可, view 静态内容动态
+		///   - 换绑: 旧 view 在 N 帧内仍可能被采样, 调用方销毁旧 view 前请走
+		///     QueueDestroy(VK_NULL_HANDLE, oldView) 复用帧环延迟销毁
+		///   - view 未变化时无需重复调用 (内部已去重)
+		/// </summary>
+		void UpdateTexture2D(Texture2DHandle handle, VkImageView image_view);
 
 		void DestroyTexture2D(Texture2DHandle handle);
 

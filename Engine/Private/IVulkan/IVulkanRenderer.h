@@ -28,6 +28,12 @@ namespace INVENT
 			void* mapped = nullptr;
 		};
 
+		struct ScenceRT
+		{
+			VkImage image = VK_NULL_HANDLE;
+			VkImageView imageView = VK_NULL_HANDLE;
+		};
+
 	public:
 		static bool Init();
 		static void Shutdown();
@@ -36,7 +42,8 @@ namespace INVENT
 		static void RenderFrame(std::uint32_t frameindex);
 		static void EndRender();
 
-		static void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func) { _imgui_new_frame_func = func; }
+		static void SetMainRTExtent(std::uint32_t width, std::uint32_t height);
+		static void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func) { _imgui_new_frame_func = func; _use_imgui = true; }
 		static void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func) { _imgui_end_frame_and_fetch_func = func; }
 		static void SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func) { _imgui_draw_data_func = func; }
 		static void SetClearColor(VkClearColorValue v) { _vk_clear.color = v; }
@@ -48,10 +55,14 @@ namespace INVENT
 		static bool _init_test_resources();	// 全局采样器 + set1 + 测试纹理
 		static void _record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present);
 		static void _record_depth_barrier(VkCommandBuffer cmd, VkImage depth_image);
+		static void _record_rt_image_color2shader_barrier(VkCommandBuffer cmd, VkImage image); // 离屏渲染
 		static void _imgui_barrier(VkCommandBuffer cmd, VkImage image);
 		static void _write_buffer_binding(VkDescriptorSet set, std::uint32_t binding, VkBuffer buffer, bool is_ubo);
 		static void _upload_per_frame_data(std::uint32_t frame_index);
 		static bool _recreate_swapchain();
+		static bool _recreate_mainRTs();
+		// 离屏渲染imageview延迟销毁
+		static bool _flush_destroy_queue();
 		static void _clear();
 
 	private:
@@ -65,6 +76,11 @@ namespace INVENT
 		inline static std::vector<VkSemaphore> _submit_semaphores;	// 每交换链图像
 		inline static std::vector<VkCommandBuffer> _command_buffers;
 
+		inline static std::vector<ScenceRT> _mainRTs; // 主场景进行离屏渲染
+		inline static ScenceRT _main_depth_RT;		// 主场景进行离屏渲染使用的深度附件
+		inline static VkFormat _mainRT_format = VK_FORMAT_UNDEFINED; // 主渲染作为离屏渲染时所用的 format （编辑器与渲染后期处理时会使用）
+		inline static VkExtent2D _mainRT_extent{ 0,0 }; // 离屏渲染大小
+
 		// set0: 每帧一份 (一个 set 包含 binding 0~4 全部)
 		inline static std::vector<VkDescriptorSet> _set0;
 
@@ -73,12 +89,7 @@ namespace INVENT
 		// 未使用 binding (1灯光/3间接命令) 的占位, 防未更新告警
 		inline static std::vector<U_SS_BO> _point_light_buffers;
 		// binding 3 间接命令 (含每个批次的 drawCount)
-		inline static std::vector<U_SS_BO> _draw_count_and_indirect_buffers;
-
-		// 测试实例数据: [0] = 测试纹理 slot; 接真实渲染时换成 InstanceBuffer 的 ssbo
-		inline static VkBuffer _test_instance_buffer = VK_NULL_HANDLE;
-		inline static void* _test_instance_mapped = nullptr;
-		
+		inline static std::vector<U_SS_BO> _draw_count_and_indirect_buffers;	
 
 		inline static VkClearValue _vk_clear{};
 
@@ -91,11 +102,13 @@ namespace INVENT
 		inline static std::uint32_t _current_frame{ 0 };	// EndRender 用
 		inline static bool _frame_skipped{ false };
 		inline static bool _swapchain_dirty{ false };
+		inline static bool _main_rt_extent_dirty{ false };
 
 		// imgui
 		inline static IImgui::ImguiNewFrameFunc _imgui_new_frame_func = nullptr;
 		inline static IImgui::ImguiEndFrameAndFetchDataFunc _imgui_end_frame_and_fetch_func = nullptr;
 		inline static IImgui::ImguiRenderDrawDataFunc _imgui_draw_data_func = nullptr;
 		inline static void* _imgui_frame_data = nullptr;
+		inline static bool _use_imgui{ false };
 	};
 }
