@@ -145,6 +145,7 @@ enum LightFlag : uint32_t
 struct UBO
 {
     float4x4 vp; // 视图投影矩阵
+    float4x4 invVP; // 视图投影矩阵的逆矩阵
     float4 cameraDatas; // 相机数据 [xyz]: 相机位置 [w]: LOD 系数
     float4 parallelLightDatas; // 灯光数据 [xyz]: 平行光方向 [w]: 平行光强度
     float4 parallelLightColor; // 平行光颜色

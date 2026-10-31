@@ -43,14 +43,13 @@ void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     if (objectID != 0)
     {
-        float2 uv = float2(mouseCoord.x / float(rtWidth), mouseCoord.y / float(rtHeight));
+        float2 uv = (float2(pixelCoord) + 0.5) / float2(rtWidth, rtHeight);
 
         // 深度 RT 注册到 bindless 后
         float depth = gTexture[NonUniformResourceIndex(depthSlot)].Load(int3(pixelCoord, 0)).x;
 
-        float4x4 invVP = transpose(mat4_inverse(gUBO.vp));
         float4 clipPos = float4(uv.x * 2.0 - 1.0, uv.y * 2.0 - 1.0, depth, 1.0);
-        float4 worldPos = mul(invVP, clipPos);
+        float4 worldPos = mul(gUBO.invVP, clipPos);
         worldPosition = worldPos.xyz / worldPos.w;
     }
 

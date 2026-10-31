@@ -12,6 +12,7 @@
 #include "IMemPool/IMemPool.h"
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
@@ -30,6 +31,7 @@ namespace IVulkan
 	struct UBO
 	{
 		glm::mat4 VP{ 1.0f };
+		glm::mat4 InvVP{ 1.0f };
 		glm::vec4  cameraDatas; // 相机数据 [xyz]: 相机位置 [w]: LOD 系数
 		glm::vec4 parallelLightDatas; // 灯光数据 [xyz]: 平行光方向 [w]: 平行光强度
 		glm::vec4 parallelLightColor; // 平行光颜色
@@ -282,6 +284,7 @@ namespace INVENT
 		viewMatrix = glm::lookAt(cameraPos, cameraPos + cameraForward, cameraUp);
 		//////////////////////
 		ubo.VP = projectionMatrix * viewMatrix;
+		ubo.InvVP = glm::inverse(ubo.VP);
 		ubo.cameraDatas = { cameraPos, 0.0f };
 		if (auto height = engine.GetWindowHeight())
 		{
