@@ -314,7 +314,8 @@ namespace INVENT
 			auto mPosition = _get_current_mouse_position_func();
 			//INVENT_LOG_DEBUG(std::format("[IVulkanRenderer] _get_current_mouse_position_func() x: {}. y:{}.", mPosition.x, mPosition.y));
 			back.mouseCoords = { mPosition.x, mPosition.y };
-			back.isTakeCS = 1;
+			if (mPosition.x > 0.0f && mPosition.y > 0.0f)
+				back.isTakeCS = 1;
 		}
 		back.idTextureSlot = static_cast<std::uint16_t>(_object_id_RTs[frame_index].bindlessSlot);
 		back.depthTextureSlot = static_cast<std::uint16_t>(_main_depth_RT.bindlessSlot);
@@ -1062,23 +1063,11 @@ namespace INVENT
 			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 			VK_ACCESS_2_SHADER_READ_BIT);
 
-		bool takeMPositionObjIDCS = false;
-		{
-			std::shared_lock<std::shared_mutex> lock(PosOIDCallbacksMutex);
-			if (!FramePosOIDCallbacks[frameindex].empty())
-			{
-				takeMPositionObjIDCS = true;
-			}
-		}
-		if (takeMPositionObjIDCS)
-		{
-			INVENT_LOG_TRACE("[Renderer] takeMPositionObjIDCS!");
-			// ObjectID 拾取计算着色器
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _object_id_compute_pipeline);
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-				base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
-			vkCmdDispatch(cmd, 1, 1, 1);
-		}
+		// ObjectID 拾取计算着色器
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _object_id_compute_pipeline);
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
+		vkCmdDispatch(cmd, 1, 1, 1);
 
 		// draw imgui
 		if (_use_imgui)
