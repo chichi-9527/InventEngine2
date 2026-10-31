@@ -12,10 +12,10 @@
 int main()
 {
     INVENT::ILog::Init({"./Log", "editor"});
-
+    
     INVENT::ShaderCompiler::Test();
-
-    EditorWindow window;
+    
+    EditorWindow& window = EditorWindow::Instance();
     window.InitWindow();
     window.Start();
     
