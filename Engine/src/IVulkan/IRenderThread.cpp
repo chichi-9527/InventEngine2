@@ -14,19 +14,34 @@ namespace INVENT
 		return r;
 	}
 
-	void IRenderThread::SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func)
+	void IRenderThreadBase::SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func)
 	{
 		IVulkanRenderer::SetImguiNewFrameFunc(func);
 	}
 
-	void IRenderThread::SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func)
+	void IRenderThreadBase::SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func)
 	{
 		IVulkanRenderer::SetImguiEndFrameAndFetchDataFunc(func);
 	}
 
-	void IRenderThread::SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func)
+	void IRenderThreadBase::SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func)
 	{
 		IVulkanRenderer::SetImguiRenderDrawDataFunc(func);
+	}
+
+	void IRenderThreadBase::SetCurrentViewWindowMousePositionFunc(GetCurrentViewWindowMousePositionFunc func)
+	{
+		IVulkanRenderer::SetCurrentViewWindowMousePositionFunc(func);
+	}
+
+	void IRenderThreadBase::SetReturnWorldPositionObjectIDFunc(ReturnWorldPositionObjectIDFunc func)
+	{
+		IVulkanRenderer::SetReturnWorldPositionObjectIDFunc(func);
+	}
+
+	void IRenderThreadBase::RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func)
+	{
+		IVulkanRenderer::RegisterMouseWPositionObjGetFunc(func);
 	}
 
 	bool IRenderThread::Init()

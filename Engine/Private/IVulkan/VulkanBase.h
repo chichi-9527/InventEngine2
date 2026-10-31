@@ -110,6 +110,7 @@ namespace INVENT
 
 			// vulkan >= 1.3
 			VkFormat ColorAttachmentFormat = VK_FORMAT_UNDEFINED;
+			VkFormat SecondColorAttachmentFormat = VK_FORMAT_UNDEFINED;
 			VkFormat DepthAttachmentFormat = VK_FORMAT_UNDEFINED;
 
 			VkBool32 EnableDepthTest = VK_TRUE;
@@ -201,6 +202,7 @@ namespace INVENT
 		VkExtent2D GetSwapChainExtent() const { return _swap_chain_extent; }
 		VkDescriptorPool GetImguiDsecriptorPool() const { return _imgui_descriptor_pool; }
 		VkDescriptorSet GetGlobalBindlessDescriptorSet() const { return _global_bindless_descriptor_set; }
+		VkDescriptorSet& GetGlobalBindlessDescriptorSet() { return _global_bindless_descriptor_set; }
 		const VkPhysicalDeviceProperties& GetPhysicalDeviceProperties() const { return _physical_device_properties; }
 		const VkPhysicalDeviceMemoryProperties& GetPhysicalDeviceMemoryProperties() const { return _physical_device_memory_properties; }
 		uint32_t GetCurrentBindlessDescriptorCount() const { return _current_descriptor_count; }
@@ -272,6 +274,8 @@ namespace INVENT
 
 		std::mutex _queue_mutex; // VkQueue 锁
 
+		// set0 除 binding0 外的 binding 数量
+		std::uint32_t _set0_binding_count{ 0 };
 		bool _is_physical_device_16bit{ false };
 
 	};

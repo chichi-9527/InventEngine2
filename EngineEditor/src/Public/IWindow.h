@@ -44,9 +44,9 @@ namespace INVENT
 		virtual void _cursor_enter_callback(int entered) = 0;
 
 	protected:
-		static inline GLFWwindow* _glfw_window = nullptr;
-		static inline GLFWmonitor* _glfw_monitor = nullptr;
-		static inline const GLFWvidmode* _glfw_vidmode = nullptr;
+		GLFWwindow* _glfw_window = nullptr;
+		GLFWmonitor* _glfw_monitor = nullptr;
+		const GLFWvidmode* _glfw_vidmode = nullptr;
 
 		WindowSize _window_size{};
 

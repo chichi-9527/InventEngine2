@@ -85,8 +85,14 @@ VSOutput VSMain(uint vertexId: SV_VertexID, uint instanceId: SV_InstanceID)
     return output;
 }
 
+struct FSOutput
+{
+    float4 color : SV_Target0;
+    uint objectID : SV_Target1;
+};
+
 [shader("fragment")]
-float4 FSMain(VSOutput input) : SV_Target
+FSOutput FSMain(VSOutput input)
 {
     float3 N = normalize(input.normal);
     float3 V = normalize(gUBO.cameraDatas.xyz - input.worldPos);
@@ -143,7 +149,10 @@ float4 FSMain(VSOutput input) : SV_Target
         {
             alpha *= gTexture[NonUniformResourceIndex(input.opacityTexId)].Sample(gSampler, input.uv).r;
         }
-        return float4(albedo, alpha);
+        FSOutput output;
+        output.color = float4(albedo, alpha);
+        output.objectID = instance.objectID;
+        return output;
     }
 
     // 金属度 / 粗糙度
@@ -226,7 +235,10 @@ float4 FSMain(VSOutput input) : SV_Target
         alpha *= gTexture[NonUniformResourceIndex(input.opacityTexId)].Sample(gSampler, input.uv).r;
     }
 
-    return float4(color, alpha);
+    FSOutput output;
+    output.color = float4(color, alpha);
+    output.objectID = instance.objectID;
+    return output;
 }
 
 // ===== PBR 辅助函数 =====

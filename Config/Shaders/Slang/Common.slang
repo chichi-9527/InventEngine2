@@ -173,6 +173,12 @@ struct SpotLight
     uint32_t TextureSlot; // cookie/gobo 投影纹理
 };
 
+struct ObjectIDGetBack
+{
+    uint32_t4 inPacked; // [xy] 鼠标位置 [z] id 和 depth 纹理的 slot [w] 是否进行计算
+    uint32_t4 outPacked; // [xyz] 获取鼠标位置对应的世界坐标 [w] 实例ID 为0表示未命中任何实例，position 也无效
+};
+
 struct PushConstants
 {
     uint32_t DrawObjectIndex; // 本次绘制对象索引

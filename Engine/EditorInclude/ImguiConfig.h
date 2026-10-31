@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include "FuncDef.h"
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -18,4 +20,17 @@ namespace IImgui
 	using ImguiClearDescriptorsBeforeReSizeFunc = void(*)();
 	
 
+}
+
+namespace INVENT
+{
+	// 坐标原点在左上角
+	struct MousePosition
+	{
+		float x{ 0.0f };
+		float y{ 0.0f };
+	};
+	using GetCurrentViewWindowMousePositionFunc = MousePosition(*)();
+
+	using ReturnWorldPositionObjectIDFunc = void(*)(MouseWorldPositionObjGetBackFunc callback, Vec3 position, std::uint32_t object_id);
 }

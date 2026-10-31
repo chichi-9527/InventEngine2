@@ -51,6 +51,7 @@ namespace Editor
     static std::vector<VkImageView> CachedImageViews;
     static std::vector<ImTextureID> ScenceTextureIDs;
     static ImGuiContext* ImguiContext = nullptr;
+    static ImVec2 lastSize = { 0, 0 };
 
     static void CopyImDrawData(ImDrawData*& dst, const ImDrawData* src)
     {
@@ -83,6 +84,12 @@ namespace Editor
     }
 }
 
+EditorWindow& EditorWindow::Instance()
+{
+    static EditorWindow w;
+    return w;
+}
+
 bool EditorWindow::Start()
 {
     INVENT::IEngine::Instatnce().Init();
@@ -103,7 +110,7 @@ bool EditorWindow::Start()
     INVENT::IRenderThreadBase::Instance().SetCreateSurfaceFunction(
         [](VkInstance instance, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface)->VkResult
         {
-            return glfwCreateWindowSurface(instance, IWindow::_glfw_window, allocator, surface);
+            return glfwCreateWindowSurface(instance, EditorWindow::Instance().GetGLFWWindow(), allocator, surface);
         }
     );
     INVENT::IRenderThreadBase::Instance().SetImguiVkInitFunction(
@@ -191,13 +198,13 @@ bool EditorWindow::Start()
             ImGui::Begin("Scene Viewport");
 
             ImVec2 viewportSize = ImGui::GetContentRegionAvail();
-            static ImVec2 lastSize = { 0, 0 };
-            if (viewportSize.x != lastSize.x || viewportSize.y != lastSize.y)
+            
+            if (viewportSize.x != Editor::lastSize.x || viewportSize.y != Editor::lastSize.y)
             {
                 if (viewportSize.x > 0 && viewportSize.y > 0)
                 {
                     INVENT::IRenderThreadBase::Instance().OnViewportResize(static_cast<std::uint32_t>(viewportSize.x), static_cast<std::uint32_t>(viewportSize.y));
-                    lastSize = viewportSize;
+                    Editor::lastSize = viewportSize;
 
                 }
             }
@@ -210,8 +217,6 @@ bool EditorWindow::Start()
             {
                 ImGui::Text("Viewport Ready. Waiting for Engine Active Frame...");
             }
-
-            ImGui::Button("If you see this, ImGui works!");
 
             ImGui::End();
             ImGui::PopStyleVar();
@@ -248,6 +253,26 @@ bool EditorWindow::Start()
             if (!pCapturedDrawData) return;
             ImDrawData* drawData = static_cast<ImDrawData*>(pCapturedDrawData);
             ImGui_ImplVulkan_RenderDrawData(drawData, cmd);
+        }
+    );
+    INVENT::IRenderThreadBase::Instance().SetCurrentViewWindowMousePositionFunc(
+        []()->INVENT::MousePosition {
+            double xpos, ypos;
+            glfwGetCursorPos(EditorWindow::Instance().GetGLFWWindow(), &xpos, &ypos);
+            //INVENT_LOG_DEBUG(std::format("EditorWindow::Instance().GetGLFWWindow() x: {}. y:{}.", xpos, ypos));
+            // TODO 计算视窗中鼠标的位置
+
+            INVENT::MousePosition pos = { static_cast<float>(xpos), static_cast<float>(ypos) };
+            return pos;
+        }
+    );
+    INVENT::IRenderThreadBase::Instance().SetReturnWorldPositionObjectIDFunc(
+        [](INVENT::MouseWorldPositionObjGetBackFunc func, INVENT::Vec3 world_position, std::uint32_t object_id) {
+            INVENT_LOG_DEBUG(std::format("return data : posotion x: {}.\n y: {}.\n z: {}.\n obj id: {}.",
+                world_position.x, world_position.y, world_position.z,
+                object_id));
+
+            // TODO : 执行 func 应该放入主线程队列
         }
     );
     
@@ -427,6 +452,9 @@ void EditorWindow::_register_key_callback(int key, int scancode, int action, int
 
 void EditorWindow::_cursor_position_callback(double xpos, double ypos)
 {
+
+    
+    INVENT::IRenderThreadBase::Instance().RegisterMouseWPositionObjGetFunc(nullptr);
     // imgui
     ImGui::GetIO().AddMousePosEvent(static_cast<float>(xpos), static_cast<float>(ypos));
 }

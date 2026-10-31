@@ -19,9 +19,6 @@ namespace INVENT
 		void SetCreateSurfaceFunction(CreateSurfaceFunc func) override { _create_surface = func; }
 		void SetImguiVkInitFunction(ImguiVkInitFunc func) override { _imgui_init_func = func; }
 		void SetImguiVkShutdownFunction(ImguiVkShutdownFunc func) override { _imgui_shutdown_func = func; }
-		void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func) override;
-		void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func) override;
-		void SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func) override;
 
 		bool Init() override;
 		bool Start() override;

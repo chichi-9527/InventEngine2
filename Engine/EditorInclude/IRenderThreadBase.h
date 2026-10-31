@@ -40,9 +40,14 @@ namespace INVENT
 		virtual void SetCreateSurfaceFunction(CreateSurfaceFunc func) = 0;
 		virtual void SetImguiVkInitFunction(ImguiVkInitFunc func) = 0;
 		virtual void SetImguiVkShutdownFunction(ImguiVkShutdownFunc func) = 0;
-		virtual void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func) = 0;
-		virtual void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func) = 0;
-		virtual void SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func) = 0;
+
+		void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func);
+		void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func);
+		void SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func);
+		void SetCurrentViewWindowMousePositionFunc(GetCurrentViewWindowMousePositionFunc func);
+		void SetReturnWorldPositionObjectIDFunc(ReturnWorldPositionObjectIDFunc func);
+
+		void RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func);
 
 		void OnViewportResize(std::uint32_t w, std::uint32_t h);
 

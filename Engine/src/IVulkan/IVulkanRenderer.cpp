@@ -8,12 +8,15 @@
 #include "IVulkan/IVulkanGlobalMaterial.h"
 #include "ILog.h"
 #include "IEngine.h"
+#include "IEngineTools.h"
+#include "IMemPool/IMemPool.h"
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
 #include <cstring>
+#include <shared_mutex>
 
 namespace IVulkan
 {
@@ -41,6 +44,17 @@ namespace IVulkan
 		glm::vec4 attenuation{ 1.0f }; // [x] 衰减系数 [yzw] 预留(目前未使用)
 	};
 
+	struct ObjectIDGetBack 
+	{
+		glm::vec2 mouseCoords{ 0.0f };
+		std::uint16_t idTextureSlot{ 0 };
+		std::uint16_t depthTextureSlot{ 0 };
+		std::uint32_t isTakeCS{ 0 }; // 0: 计算着色器中不会执行任何操作; 非0: 执行
+		glm::vec3 wPosition{ 0.0f };
+		std::uint32_t objectID{ 0 }; // 返回的id，0 为无效同时position也无效
+	};
+	static_assert(sizeof(ObjectIDGetBack) == 32);
+
 }
 
 namespace INVENT
@@ -53,6 +67,7 @@ namespace INVENT
 	constexpr const char* MainMeshVSPath = "Config/Shaders/SPV/MainMesh.vert.spv";
 	constexpr const char* MainMeshFSPath = "Config/Shaders/SPV/MainMesh.frag.spv";
 	constexpr const char* GeneralCSPath = "Config/Shaders/SPV/GeneralCompute.comp.spv";
+	constexpr const char* ObjectIDGetCSPath = "Config/Shaders/SPV/ObjectIDGet.comp.spv";
 
 	static IVulkan::PushConstants pushConstants{};
 
@@ -63,6 +78,8 @@ namespace INVENT
 	};
 	static std::array<std::vector<DestroyRT>, IVulkan::MAX_FRAMES_IN_FLIGHT + 1> FrameDestroyRing;
 	static std::uint32_t _destroy_cursor = 0;
+	static std::array<std::vector<MouseWorldPositionObjGetBackFunc>, IVulkan::MAX_FRAMES_IN_FLIGHT> FramePosOIDCallbacks;
+	static std::shared_mutex PosOIDCallbacksMutex;
 
 	bool IVulkanRenderer::Init()
 	{
@@ -88,6 +105,17 @@ namespace INVENT
 			return false;
 		}
 
+		// init cache map
+		_image_barrier_cache_map = new VkImageBarrierCacheMap(64,
+			std::hash<std::uint64_t>(),
+			std::equal_to<std::uint64_t>(),
+			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::uint64_t, VkImageBarrierCache>>(IEngineTools::Instance().GetMemPoolPool()));
+
+		if (_get_current_mouse_position_func == nullptr)
+		{
+			INVENT_LOG_WARNING("[IVulkanRenderer] 未设置获取当前鼠标位置的函数!");
+		}
+
 		_mainRT_format = VK_FORMAT_B8G8R8A8_SRGB;
 		if (!_use_imgui)
 		{
@@ -111,6 +139,12 @@ namespace INVENT
 		return true;
 	}
 
+	void IVulkanRenderer::RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func)
+	{
+		std::unique_lock<std::shared_mutex> lock(PosOIDCallbacksMutex);
+		FramePosOIDCallbacks[_current_frame].push_back(func);
+	}
+
 	bool IVulkanRenderer::_init_buffers()
 	{
 		auto& base = IVulkanBase::Base();
@@ -119,6 +153,7 @@ namespace INVENT
 		_ubo_buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
 		_point_light_buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
 		_draw_count_and_indirect_buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
+		_mouse_back_buffers.resize(IVulkan::MAX_FRAMES_IN_FLIGHT);
 
 		// point light
 		VkDeviceSize pointLightSSBOSize = sizeof(IVulkan::PointLight) * IVulkan::MAX_POINT_LIGHT_COUNT;
@@ -128,7 +163,7 @@ namespace INVENT
 		VkBufferUsageFlags binding3UsageFlags = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 		// 在渲染前需要用 vkCmdFillBuffer 將其清零加上 TRANSFER_DST 標記
 		binding3UsageFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
+		
 		for (std::uint32_t i = 0; i < IVulkan::MAX_FRAMES_IN_FLIGHT; ++i)
 		{
 			// ubo
@@ -162,6 +197,17 @@ namespace INVENT
 				return false;
 			}
 
+			// binding5: 鼠标悬停反馈 ObjectID (CPU 写入坐标, GPU 回写 ID)
+			if (VkResult r = base.UseVmaCreateBuffer(sizeof(IVulkan::ObjectIDGetBack),
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+				_mouse_back_buffers[i].buffer,
+				&_mouse_back_buffers[i].mapped))
+			{
+				INVENT_LOG_ERROR("[IVulkanRenderer] ObjectID ssbo 创建失败!");
+				return false;
+			}
+
 
 		}
 
@@ -187,6 +233,7 @@ namespace INVENT
 			_write_buffer_binding(_set0[i], 2, InstanceBuffer::GetBuffer(), false);	// 实例
 			_write_buffer_binding(_set0[i], 3, _draw_count_and_indirect_buffers[i].buffer, false);		// 间接命令
 			// binding 4: 每帧 BindMipFeedback 写
+			_write_buffer_binding(_set0[i], 5, _mouse_back_buffers[i].buffer, false); // 
 		}
 		return true;
 	}
@@ -256,6 +303,47 @@ namespace INVENT
 
 		base.UseVmaFlushAllocationBuffer(_ubo_buffers[frame_index].buffer);
 		//base.UseVmaFlushAllocationBuffer(_point_light_buffers[frame_index].buffer);
+
+		// 鼠标指针位置数据获取
+		IVulkan::ObjectIDGetBack back{};
+		if (_get_current_mouse_position_func)
+		{
+			auto mPosition = _get_current_mouse_position_func();
+			//INVENT_LOG_DEBUG(std::format("[IVulkanRenderer] _get_current_mouse_position_func() x: {}. y:{}.", mPosition.x, mPosition.y));
+			back.mouseCoords = { mPosition.x, mPosition.y };
+			back.isTakeCS = 1;
+		}
+		back.idTextureSlot = static_cast<std::uint16_t>(_object_id_RTs[frame_index].bindlessSlot);
+		back.depthTextureSlot = static_cast<std::uint16_t>(_main_depth_RT.bindlessSlot);
+
+		memcpy(_mouse_back_buffers[frame_index].mapped, &back, sizeof(IVulkan::ObjectIDGetBack));
+		base.UseVmaFlushAllocationBuffer(_mouse_back_buffers[frame_index].buffer);
+	}
+
+	void IVulkanRenderer::_read_and_callback_mouseback(std::uint32_t frame_index)
+	{
+		std::unique_lock<std::shared_mutex> lock(PosOIDCallbacksMutex);
+
+		auto& callbacks = FramePosOIDCallbacks[frame_index];
+		auto& mBuffer = _mouse_back_buffers[frame_index];
+
+		if (frame_index >= IVulkan::MAX_FRAMES_IN_FLIGHT) return;
+		if (mBuffer.mapped == nullptr) return;
+		if (callbacks.empty()) return;
+		if (_return_world_position_obj_id_func == nullptr) return;
+
+		IVulkanBase::Base().UseVmaInvalidateAllocationBuffer(mBuffer.buffer);
+
+		IVulkan::ObjectIDGetBack* back = reinterpret_cast<IVulkan::ObjectIDGetBack*>(mBuffer.mapped);
+
+		for (auto callback : callbacks)
+		{
+			_return_world_position_obj_id_func(callback,
+				{ back->wPosition.x, back->wPosition.y, back->wPosition.z },
+				back->objectID);
+		}
+
+		callbacks.clear();
 	}
 
 	bool IVulkanRenderer::_recreate_swapchain()
@@ -263,6 +351,10 @@ namespace INVENT
 		auto& base = IVulkanBase::Base();
 		auto device = base.GetDevice();
 
+		for (auto image : base.GetSwapChainImages())
+		{
+			_image_barrier_cache_map->erase(reinterpret_cast<std::uint64_t>(image));
+		}
 		if (!base.RecreateSwapChain())
 		{
 			return false;
@@ -287,12 +379,29 @@ namespace INVENT
 			_main_rt_extent_dirty = true;
 		}
 
+		// 在 UseVmaCreateImage 成功后立即:
+		VkImageBarrierCache init{};
+		init.imageAspectFlags = VK_IMAGE_ASPECT_COLOR_BIT;
+		init.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		init.currentStageMask = VK_PIPELINE_STAGE_2_NONE;
+		init.currentAccessMask = 0;
+		for (auto image : base.GetSwapChainImages())
+		{
+			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(image)] = init;
+		}
+
 		return true;
 	}
 
 	bool IVulkanRenderer::_recreate_mainRTs()
 	{
 		auto& base = IVulkanBase::Base();
+
+		VkImageBarrierCache ColorImageInit{};
+		ColorImageInit.imageAspectFlags = VK_IMAGE_ASPECT_COLOR_BIT;
+		ColorImageInit.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ColorImageInit.currentStageMask = VK_PIPELINE_STAGE_2_NONE;
+		ColorImageInit.currentAccessMask = 0;
 
 		VkImageUsageFlags rtUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 		for (auto& rt : _mainRTs)
@@ -323,33 +432,83 @@ namespace INVENT
 				INVENT_LOG_ERROR("[IVulkanRenderer] main rt image view create error! result: {}.");
 				return false;
 			}
+
+			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(rt.image)] = ColorImageInit;
 		}
-		if (_main_depth_RT.imageView != VK_NULL_HANDLE || _main_depth_RT.image != VK_NULL_HANDLE)
+		if (_main_depth_RT.sRT.imageView != VK_NULL_HANDLE || _main_depth_RT.sRT.image != VK_NULL_HANDLE)
 		{
-			FrameDestroyRing[_destroy_cursor].push_back({ _main_depth_RT.image, _main_depth_RT.imageView });
+			FrameDestroyRing[_destroy_cursor].push_back({ _main_depth_RT.sRT.image, _main_depth_RT.sRT.imageView });
 		}
 
-		VkImageUsageFlags depthUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+		VkImageUsageFlags depthUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 		if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
 			1,
 			base.GetDepthFormat(),
 			VK_IMAGE_TILING_OPTIMAL,
 			depthUsage,
 			0,
-			_main_depth_RT.image))
+			_main_depth_RT.sRT.image))
 		{
 			INVENT_LOG_ERROR(std::format("[IVulkanRenderer] main depth rt image create error! result: {}.", static_cast<int>(res)));
 			return false;
 		}
-		_main_depth_RT.imageView = base.CreateImageView(
-			_main_depth_RT.image,
+		_main_depth_RT.sRT.imageView = base.CreateImageView(
+			_main_depth_RT.sRT.image,
 			base.GetDepthFormat(),
 			VK_IMAGE_ASPECT_DEPTH_BIT);
-		if (_main_depth_RT.imageView == VK_NULL_HANDLE)
+		if (_main_depth_RT.sRT.imageView == VK_NULL_HANDLE)
 		{
 			INVENT_LOG_ERROR("[IVulkanRenderer] main rt image view create error! result: {}.");
 			return false;
 		}
+
+		IVulkanTexture2DManagement::Instance().UpdateTexture2D({ _main_depth_RT.bindlessSlot }, _main_depth_RT.sRT.imageView);
+
+		VkImageBarrierCache DepthImageInit{};
+		DepthImageInit.imageAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT;
+		DepthImageInit.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		DepthImageInit.currentStageMask = VK_PIPELINE_STAGE_2_NONE;
+		DepthImageInit.currentAccessMask = 0;
+		(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(_main_depth_RT.sRT.image)] = DepthImageInit;
+
+		// 重建 U32 ObjectID RT
+		auto cmd = base.BeginSingleTimeCommands();
+		for (auto& rt : _object_id_RTs)
+		{
+			if (rt.sRT.imageView != VK_NULL_HANDLE || rt.sRT.image != VK_NULL_HANDLE)
+			{
+				FrameDestroyRing[_destroy_cursor].push_back({ rt.sRT.image, rt.sRT.imageView });
+			}
+			VkImageUsageFlags idUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+			if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
+				1,
+				VK_FORMAT_R32_UINT,
+				VK_IMAGE_TILING_OPTIMAL,
+				idUsage,
+				0,
+				rt.sRT.image))
+			{
+				INVENT_LOG_ERROR(std::format("[IVulkanRenderer] object id rt recreate error! result: {}.", static_cast<int>(res)));
+				return false;
+			}
+			rt.sRT.imageView = base.CreateImageView(rt.sRT.image, VK_FORMAT_R32_UINT, VK_IMAGE_ASPECT_COLOR_BIT);
+			if (rt.sRT.imageView == VK_NULL_HANDLE)
+			{
+				INVENT_LOG_ERROR("[IVulkanRenderer] object id rt image view recreate error!");
+				return false;
+			}
+			IVulkanTexture2DManagement::Instance().UpdateTexture2D({ rt.bindlessSlot }, rt.sRT.imageView);
+
+			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(rt.sRT.image)] = ColorImageInit;
+
+			_record_image_barrier_auto(cmd, rt.sRT.image,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+				VK_ACCESS_2_SHADER_READ_BIT);
+			
+		}
+
+		base.EndSingleTimeCommands(cmd);
 
 		return true;
 	}
@@ -365,6 +524,7 @@ namespace INVENT
 			if (it.image != VK_NULL_HANDLE)
 			{
 				IVulkanBase::Base().UseVmaDestroyImage(it.image);
+				_image_barrier_cache_map->erase(reinterpret_cast<std::uint64_t>(it.image));
 			}
 		}
 		items.clear();
@@ -399,9 +559,19 @@ namespace INVENT
 			return false;
 		}
 
+		VkImageBarrierCache ColorImageInit{};
+		ColorImageInit.imageAspectFlags = VK_IMAGE_ASPECT_COLOR_BIT;
+		ColorImageInit.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ColorImageInit.currentStageMask = VK_PIPELINE_STAGE_2_NONE;
+		ColorImageInit.currentAccessMask = 0;
+		// swapchain cache
+		for (auto image : base.GetSwapChainImages())
+			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(image)] = ColorImageInit;
+
 		// 图形管线
 		// main
 		_mainRTs.resize(static_cast<size_t>(IVulkan::MAX_FRAMES_IN_FLIGHT));
+		_object_id_RTs.resize(static_cast<size_t>(IVulkan::MAX_FRAMES_IN_FLIGHT));
 		if (_mainRT_extent.width != 0 && _mainRT_extent.height != 0)
 		{
 			VkImageUsageFlags rtUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -428,34 +598,89 @@ namespace INVENT
 					INVENT_LOG_ERROR("[IVulkanRenderer] main rt image view create error! result: {}.");
 					return false;
 				}
+
+				(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(rt.image)] = ColorImageInit;
 			}
-			VkImageUsageFlags depthUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+			// U32 ObjectID 渲染目标 (绑定到 bindless 供 CS 通过 slot 查找)
+			VkImageUsageFlags idUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+			auto cmd = base.BeginSingleTimeCommands();
+			for (auto& rt : _object_id_RTs)
+			{
+				if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
+					1,
+					VK_FORMAT_R32_UINT,
+					VK_IMAGE_TILING_OPTIMAL,
+					idUsage,
+					0,
+					rt.sRT.image))
+				{
+					INVENT_LOG_ERROR(std::format("[IVulkanRenderer] object id rt image create error! result: {}.", static_cast<int>(res)));
+					return false;
+				}
+
+				rt.sRT.imageView = base.CreateImageView(
+					rt.sRT.image,
+					VK_FORMAT_R32_UINT,
+					VK_IMAGE_ASPECT_COLOR_BIT);
+				if (rt.sRT.imageView == VK_NULL_HANDLE)
+				{
+					INVENT_LOG_ERROR("[IVulkanRenderer] object id rt image view create error!");
+					return false;
+				}
+
+				// 注册到全局 bindless 纹理数组
+				rt.bindlessSlot = IVulkanTexture2DManagement::Instance().AllocateTextureHandle().slot;
+				IVulkanTexture2DManagement::Instance().UpdateTexture2D({ rt.bindlessSlot }, rt.sRT.imageView);
+
+				(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(rt.sRT.image)] = ColorImageInit;
+
+				_record_image_barrier_auto(cmd, rt.sRT.image,
+					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+					VK_ACCESS_2_SHADER_READ_BIT);
+				
+			}
+			base.EndSingleTimeCommands(cmd);
+
+			VkImageUsageFlags depthUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 			if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
 				1,
 				base.GetDepthFormat(),
 				VK_IMAGE_TILING_OPTIMAL,
 				depthUsage,
 				0,
-				_main_depth_RT.image))
+				_main_depth_RT.sRT.image))
 			{
 				INVENT_LOG_ERROR(std::format("[IVulkanRenderer] main depth rt image create error! result: {}.", static_cast<int>(res)));
 				return false;
 			}
-			_main_depth_RT.imageView = base.CreateImageView(
-				_main_depth_RT.image,
+			_main_depth_RT.sRT.imageView = base.CreateImageView(
+				_main_depth_RT.sRT.image,
 				base.GetDepthFormat(),
 				VK_IMAGE_ASPECT_DEPTH_BIT);
-			if (_main_depth_RT.imageView == VK_NULL_HANDLE)
+			if (_main_depth_RT.sRT.imageView == VK_NULL_HANDLE)
 			{
 				INVENT_LOG_ERROR("[IVulkanRenderer] main rt image view create error! result: {}.");
 				return false;
 			}
+			_main_depth_RT.bindlessSlot = IVulkanTexture2DManagement::Instance().AllocateTextureHandle().slot;
+			IVulkanTexture2DManagement::Instance().UpdateTexture2D({ _main_depth_RT.bindlessSlot }, _main_depth_RT.sRT.imageView);
+			// _main_depth_RT
+			VkImageBarrierCache DepthInit{};
+			DepthInit.imageAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT;
+			DepthInit.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			DepthInit.currentStageMask = VK_PIPELINE_STAGE_2_NONE;
+			DepthInit.currentAccessMask = 0;
+			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(_main_depth_RT.sRT.image)] = DepthInit;
 		}
 
 		IVulkanBase::GraphicsPipelineConfig cfg{};
 		cfg.VertexShader = vs;
 		cfg.FragmentShader = fs;
 		cfg.ColorAttachmentFormat = base.GetSwapChainImageFormat();
+		//INVENT_LOG_DEBUG(std::format("[IVulkanRenderer] base.GetSwapChainImageFormat(): {}.", static_cast<uint32_t>(base.GetSwapChainImageFormat())));
+		cfg.SecondColorAttachmentFormat = VK_FORMAT_R32_UINT;
 		cfg.DepthAttachmentFormat = base.GetDepthFormat();
 		cfg.EnableDepthTest = VK_TRUE;
 		cfg.CullMode = VK_CULL_MODE_NONE;
@@ -465,6 +690,19 @@ namespace INVENT
 		// 反馈计算管线 (全局 layout: set0)
 		_compute_pipeline = base.CreateComputePipeline(cs);
 		if (_compute_pipeline == VK_NULL_HANDLE) return false;
+
+		// ObjectID 拾取计算管线
+		{
+			auto csObj = base.CreateShaderMoudle(ObjectIDGetCSPath);
+			if (csObj == VK_NULL_HANDLE)
+			{
+				INVENT_LOG_FATAL("[IVulkanRenderer] ObjectID 计算着色器加载失败!");
+				return false;
+			}
+			_object_id_compute_pipeline = base.CreateComputePipeline(csObj);
+			base.DestroyShaderMoudle(csObj);
+			if (_object_id_compute_pipeline == VK_NULL_HANDLE) return false;
+		}
 
 		base.DestroyShaderMoudle(vs);
 		base.DestroyShaderMoudle(fs);
@@ -534,7 +772,7 @@ namespace INVENT
 		testData.IndexCount = gviHandle.indexCount;
 		testData.MaterialAddress = IVulkanGlobalMaterial::Instance().GetMaterialAddress(mHandle);
 		testData.AABBExtent = { 0.5f,0.5f,0.5f,0.0f };
-		testData.ObjectID = 1;
+		testData.ObjectID = 2;
 		testData.LevelID = 0;
 		testData.InstanceOptionFlags |= InstanceBuffer::InstanceOptionFlag::ShowInstance;
 		if (gviHandle.use32BitIndex)
@@ -582,6 +820,9 @@ namespace INVENT
 
 		// 1) 帧同步
 		vkWaitForFences(device, 1, &_frame_fences[frameindex], VK_TRUE, UINT64_MAX);
+
+		// 回读
+		_read_and_callback_mouseback(frameindex);
 
 		// 2) 流式三连 (fence 已等, readback 安全); FlushDestroyQueue 每帧恰好一次
 		texMgmt.ProcessMipFeedback(frameindex);
@@ -642,22 +883,40 @@ namespace INVENT
 		// 2) 交换链: UNDEFINED -> COLOR_ATTACHMENT (srcStage 与提交时的 acquire 等待阶段对齐)
 		if (_use_imgui)
 		{
-			_record_swapchain_barrier(cmd, _mainRTs[frameindex].image, false);
+			_record_image_barrier_auto(cmd, _mainRTs[frameindex].image,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 		}
 		else
 		{
-			_record_swapchain_barrier(cmd, swapImage, false);
+			_record_image_barrier_auto(cmd, swapImage,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 		}
 
 		// 深度缓冲: UNDEFINED -> DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 		if (_use_imgui)
 		{
-			_record_depth_barrier(cmd, _main_depth_RT.image);
+			_record_image_barrier_auto(cmd, _main_depth_RT.sRT.image,
+				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+				VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+				VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 		}
 		else
 		{
-			_record_depth_barrier(cmd, base.GetDepthImage());
+			_record_image_barrier_auto(cmd, base.GetDepthImage(),
+				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+				VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+				VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 		}
+
+		// U32 ObjectID RT: SHADER -> COLOR_ATTACHMENT_OPTIMAL
+		_record_image_barrier_auto(cmd, _object_id_RTs[frameindex].sRT.image,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
 		// 脏材质上传 + 读屏障
 		IVulkanGlobalMaterial::Instance().FlushDirtyMaterials(cmd, frameindex);
@@ -748,7 +1007,7 @@ namespace INVENT
 		depth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 		if (_use_imgui)
 		{
-			depth.imageView = _main_depth_RT.imageView;
+			depth.imageView = _main_depth_RT.sRT.imageView;
 		}
 		else
 		{
@@ -757,15 +1016,26 @@ namespace INVENT
 		
 		depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 		depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // 清除深度缓冲区
-		depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // 绘制完如果不需要采样，可以用 DONT_CARE 优化性能
+		depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;	  // 深度需保留供后续 CS 采样
 		depth.clearValue.depthStencil = { 1.0f, 0 };	  // 默认深度设为 1.0
+
+		// U32 ObjectID 第二颜色附件
+		VkRenderingAttachmentInfo objectIDAttachment{};
+		objectIDAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+		objectIDAttachment.imageView = _object_id_RTs[frameindex].sRT.imageView;
+		objectIDAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		objectIDAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		objectIDAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		objectIDAttachment.clearValue.color.uint32[0] = 0;
+
+		VkRenderingAttachmentInfo colorAttachments[2] = { color, objectIDAttachment };
 
 		VkRenderingInfo ri{};
 		ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
 		ri.renderArea = { {0, 0}, extent };
 		ri.layerCount = 1;
-		ri.colorAttachmentCount = 1;
-		ri.pColorAttachments = &color;
+		ri.colorAttachmentCount = 2;
+		ri.pColorAttachments = colorAttachments;
 		ri.pDepthAttachment = &depth;
 
 		vkCmdBeginRendering(cmd, &ri);
@@ -777,14 +1047,50 @@ namespace INVENT
 			sizeof(VkDrawIndirectCommand));
 		vkCmdEndRendering(cmd);
 
+		// U32 ObjectID RT: COLOR_ATTACHMENT -> SHADER_READ_ONLY (供 CS 通过 bindless 读取)
+		_record_image_barrier_auto(cmd, _object_id_RTs[frameindex].sRT.image,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			VK_ACCESS_2_SHADER_READ_BIT);
+
+		// 深度 RT: DEPTH_STENCIL_ATTACHMENT -> SHADER_READ_ONLY (供 CS 通过 bindless 读取)
+		_record_image_barrier_auto(cmd, _main_depth_RT.sRT.image,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			VK_ACCESS_2_SHADER_READ_BIT);
+
+		bool takeMPositionObjIDCS = false;
+		{
+			std::shared_lock<std::shared_mutex> lock(PosOIDCallbacksMutex);
+			if (!FramePosOIDCallbacks[frameindex].empty())
+			{
+				takeMPositionObjIDCS = true;
+			}
+		}
+		if (takeMPositionObjIDCS)
+		{
+			INVENT_LOG_TRACE("[Renderer] takeMPositionObjIDCS!");
+			// ObjectID 拾取计算着色器
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _object_id_compute_pipeline);
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+				base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
+			vkCmdDispatch(cmd, 1, 1, 1);
+		}
+
 		// draw imgui
 		if (_use_imgui)
 		{
 			// 離屏顏色 RT 屏障：COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
-			_record_rt_image_color2shader_barrier(cmd, _mainRTs[frameindex].image);
+			_record_image_barrier_auto(cmd, _mainRTs[frameindex].image,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				VK_ACCESS_2_SHADER_READ_BIT);
 
 			// 交換鏈: UNDEFINED -> COLOR_ATTACHMENT (與 acquire 等待階段對齊)
-			_record_swapchain_barrier(cmd, swapImage, false);
+			_record_image_barrier_auto(cmd, swapImage,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
 			// 使用离屏渲染场景时不需要了
 			// _imgui_barrier(cmd, swapImage);
@@ -817,7 +1123,10 @@ namespace INVENT
 		}
 
 		// 5) COLOR_ATTACHMENT -> PRESENT_SRC
-		_record_swapchain_barrier(cmd, swapImage, true);
+		_record_image_barrier_auto(cmd, swapImage,
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+			0);
 	}
 
 	void IVulkanRenderer::EndRender()
@@ -879,120 +1188,38 @@ namespace INVENT
 		_main_rt_extent_dirty = true;
 	}
 
-	void IVulkanRenderer::_record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present)
+	void IVulkanRenderer::_record_image_barrier_auto(VkCommandBuffer cmd, VkImage image,
+		VkImageLayout dst_layout,
+		VkPipelineStageFlags2 dst_stage_mask,
+		VkAccessFlags2 dst_access_mask)
 	{
-		VkImageMemoryBarrier2 b{};
-		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-		b.image = image;
-		b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		auto& current = (*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(image)];
 
-		if (!to_present)
-		{
-			b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			b.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			b.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;	// 与 acquire 等待阶段对齐
-			b.srcAccessMask = 0;
-			b.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-			b.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-		}
-		else
-		{
-			b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-			b.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-			b.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-			b.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-			b.dstAccessMask = 0;
-		}
-
-		VkDependencyInfo di{};
-		di.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		di.imageMemoryBarrierCount = 1;
-		di.pImageMemoryBarriers = &b;
-		vkCmdPipelineBarrier2(cmd, &di);
-	}
-
-	void IVulkanRenderer::_record_depth_barrier(VkCommandBuffer cmd, VkImage depth_image)
-	{
-		VkImageMemoryBarrier2 b{};
-		b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-		b.image = depth_image;
-		// 注意：深度 Image 的 aspectMask 必須是 DEPTH_BIT
-		b.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-		b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		b.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-		// 來源階段：因為 oldLayout 是 UNDEFINED，不需要等待先前的特定操作
-		b.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
-		b.srcAccessMask = 0;
-
-		// 目的階段：對齊圖形管線的「早期深度測試」階段，並開啟讀寫權限
-		b.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
-		b.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-		VkDependencyInfo di{};
-		di.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		di.imageMemoryBarrierCount = 1;
-		di.pImageMemoryBarriers = &b;
-
-		vkCmdPipelineBarrier2(cmd, &di);
-	}
-
-	void IVulkanRenderer::_record_rt_image_color2shader_barrier(VkCommandBuffer cmd, VkImage image)
-	{
-		// 用於將離屏 RT 轉為貼圖供 ImGui 採樣的屏障配置
 		VkImageMemoryBarrier2 b_rt{};
 		b_rt.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
 		b_rt.image = image;
-		b_rt.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+		b_rt.subresourceRange = { current.imageAspectFlags, 0, 1, 0, 1 };
 		b_rt.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		b_rt.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
-		// 核心配置：從顏色附件寫入 轉換為 著色器片元採樣讀取
-		b_rt.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		b_rt.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-		// 來源階段：3D 管線的顏色附件輸出階段寫入完成
-		b_rt.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-		b_rt.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-
-		// 目標階段：UI 管線的片元著色器採樣讀取階段
-		b_rt.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-		b_rt.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-
+		b_rt.oldLayout = current.currentLayout;
+		b_rt.newLayout = dst_layout;
+		current.currentLayout = dst_layout;
+		
+		b_rt.srcStageMask = current.currentStageMask;
+		b_rt.dstStageMask = dst_stage_mask;
+		current.currentStageMask = dst_stage_mask;
+		
+		b_rt.srcAccessMask = current.currentAccessMask;
+		b_rt.dstAccessMask = dst_access_mask;
+		current.currentAccessMask = dst_access_mask;
+			
 		VkDependencyInfo dep{};
 		dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 		dep.imageMemoryBarrierCount = 1;
 		dep.pImageMemoryBarriers = &b_rt;
 
 		vkCmdPipelineBarrier2(cmd, &dep);
-	}
-
-	void IVulkanRenderer::_imgui_barrier(VkCommandBuffer cmd, VkImage image)
-	{
-		VkImageMemoryBarrier2 image_barrier{};
-		image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-		image_barrier.pNext = nullptr;
-		image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-		image_barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-		image_barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-		image_barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-		image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		image_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // 佈局保持不變
-		image_barrier.image = image; // 你的真實 SwapChain Image 物件
-		image_barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-		VkDependencyInfo dependency_info{};
-		dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-		dependency_info.imageMemoryBarrierCount = 1;
-		dependency_info.pImageMemoryBarriers = &image_barrier;
-
-		vkCmdPipelineBarrier2(cmd, &dependency_info);
 	}
 
 	void IVulkanRenderer::Shutdown()
@@ -1032,6 +1259,16 @@ namespace INVENT
 			}
 		}
 		_mainRTs.clear();
+		for (auto& rt : _object_id_RTs)
+		{
+			IVulkanTexture2DManagement::Instance().DestroyTexture2D({ rt.bindlessSlot });
+			if (rt.sRT.imageView != VK_NULL_HANDLE)
+				base.DestroyImageView(rt.sRT.imageView);
+			if (rt.sRT.image != VK_NULL_HANDLE)
+				base.UseVmaDestroyImage(rt.sRT.image);
+		}
+		_object_id_RTs.clear();
+		_image_barrier_cache_map->clear();
 		for (auto& d : FrameDestroyRing)
 		{
 			for (auto& rt : d)
@@ -1049,13 +1286,20 @@ namespace INVENT
 		}
 		_destroy_cursor = 0;
 		
-		if (_main_depth_RT.imageView != VK_NULL_HANDLE)
+		IVulkanTexture2DManagement::Instance().DestroyTexture2D({ _main_depth_RT.bindlessSlot });
+		if (_main_depth_RT.sRT.imageView != VK_NULL_HANDLE)
 		{
-			base.DestroyImageView(_main_depth_RT.imageView);
+			base.DestroyImageView(_main_depth_RT.sRT.imageView);
 		}
-		if (_main_depth_RT.image != VK_NULL_HANDLE)
+		if (_main_depth_RT.sRT.image != VK_NULL_HANDLE)
 		{
-			base.UseVmaDestroyImage(_main_depth_RT.image);
+			base.UseVmaDestroyImage(_main_depth_RT.sRT.image);
+		}
+
+		if (_image_barrier_cache_map)
+		{
+			delete _image_barrier_cache_map;
+			_image_barrier_cache_map = nullptr;
 		}
 
 		for (auto& b : _ubo_buffers)
@@ -1073,8 +1317,16 @@ namespace INVENT
 			if (b.buffer != VK_NULL_HANDLE) base.UseVmaDestroyBuffer(b.buffer);
 			b.buffer = VK_NULL_HANDLE;
 		}
+		for (auto& b : _mouse_back_buffers)
+		{
+			if (b.buffer != VK_NULL_HANDLE) base.UseVmaDestroyBuffer(b.buffer);
+			b.buffer = VK_NULL_HANDLE;
+		}
 			
 		_ubo_buffers.clear();
+		_point_light_buffers.clear();
+		_draw_count_and_indirect_buffers.clear();
+		_mouse_back_buffers.clear();
 
 		// 测试纹理 (GPU 资源走管理器延迟销毁环, 由随后的 TextureMgmt::Clear 冲刷)
 		if (_test_texture_slot != UINT32_MAX)

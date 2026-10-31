@@ -5,11 +5,15 @@
 
 class EditorWindow : public INVENT::IWindow
 {
-public:
 	EditorWindow() = default;
+public:
 	virtual ~EditorWindow() = default;
 
+	static EditorWindow& Instance();
+
 	virtual bool Start() override;
+
+	GLFWwindow* GetGLFWWindow() { return _glfw_window; }
 
 protected:
 

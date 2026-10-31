@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "ImguiConfig.h"
+#include "FuncDef.h"
 
 #include <vulkan/vulkan.h>
 
@@ -10,6 +11,9 @@
 
 namespace INVENT
 {
+	template<typename T>
+	class IMemPoolAllocatorOnlyFixedBlock;
+
 	/*
 	* 渲染流程 (渲染线程独占, 每帧三段式):
 	*
@@ -34,6 +38,26 @@ namespace INVENT
 			VkImageView imageView = VK_NULL_HANDLE;
 		};
 
+		struct ScenceObjectIDRT 
+		{
+			ScenceRT sRT{};
+			std::uint32_t bindlessSlot = 0; // bindless 中 slot 索引
+		};
+
+		struct VkImageBarrierCache
+		{
+			VkImageAspectFlags imageAspectFlags = VK_IMAGE_ASPECT_COLOR_BIT;
+			VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			VkPipelineStageFlags2 currentStageMask = VK_PIPELINE_STAGE_2_NONE;
+			VkAccessFlags2 currentAccessMask = 0;
+		};
+		using VkImageBarrierCacheMap = std::unordered_map<
+			std::uint64_t,
+			VkImageBarrierCache,
+			std::hash<std::uint64_t>,
+			std::equal_to<std::uint64_t>,
+			IMemPoolAllocatorOnlyFixedBlock<std::pair<const std::uint64_t, VkImageBarrierCache>>>;
+
 	public:
 		static bool Init();
 		static void Shutdown();
@@ -46,19 +70,25 @@ namespace INVENT
 		static void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func) { _imgui_new_frame_func = func; _use_imgui = true; }
 		static void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func) { _imgui_end_frame_and_fetch_func = func; }
 		static void SetImguiRenderDrawDataFunc(IImgui::ImguiRenderDrawDataFunc func) { _imgui_draw_data_func = func; }
+		static void SetCurrentViewWindowMousePositionFunc(GetCurrentViewWindowMousePositionFunc func) { _get_current_mouse_position_func = func; }
+		static void SetReturnWorldPositionObjectIDFunc(ReturnWorldPositionObjectIDFunc func) { _return_world_position_obj_id_func = func; }
+
+		static void RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func);
+
 		static void SetClearColor(VkClearColorValue v) { _vk_clear.color = v; }
 	private:
-		static bool _init_buffers();			// ubo(预留) + 测试实例 + 占位 ssbo
+		static bool _init_buffers();			// ubo +  ssbo
 		static bool _init_descriptor_sets();	// set0 x 帧数 (一个 set 含全部 binding!)
 		static bool _init_frames();			// fence/semaphore/命令缓冲
 		static bool _init_pipelines();		// 测试图形管线 + 反馈计算管线
 		static bool _init_test_resources();	// 全局采样器 + set1 + 测试纹理
-		static void _record_swapchain_barrier(VkCommandBuffer cmd, VkImage image, bool to_present);
-		static void _record_depth_barrier(VkCommandBuffer cmd, VkImage depth_image);
-		static void _record_rt_image_color2shader_barrier(VkCommandBuffer cmd, VkImage image); // 离屏渲染
-		static void _imgui_barrier(VkCommandBuffer cmd, VkImage image);
+		static void _record_image_barrier_auto(VkCommandBuffer cmd, VkImage image,
+			VkImageLayout dst_layout,
+			VkPipelineStageFlags2 dst_stage_mask,
+			VkAccessFlags2 dst_access_mask);
 		static void _write_buffer_binding(VkDescriptorSet set, std::uint32_t binding, VkBuffer buffer, bool is_ubo);
 		static void _upload_per_frame_data(std::uint32_t frame_index);
+		static void _read_and_callback_mouseback(std::uint32_t frame_index);
 		static bool _recreate_swapchain();
 		static bool _recreate_mainRTs();
 		// 离屏渲染imageview延迟销毁
@@ -68,6 +98,8 @@ namespace INVENT
 	private:
 		// compute (反馈替身, 之后 = 视锥裁剪 CS)
 		inline static VkPipeline _compute_pipeline = VK_NULL_HANDLE;
+		// ObjectID 拾取计算管线
+		inline static VkPipeline _object_id_compute_pipeline = VK_NULL_HANDLE;
 		// main (测试 quad)
 		inline static VkPipeline _main_opaque_pipeline = VK_NULL_HANDLE;
 
@@ -77,7 +109,8 @@ namespace INVENT
 		inline static std::vector<VkCommandBuffer> _command_buffers;
 
 		inline static std::vector<ScenceRT> _mainRTs; // 主场景进行离屏渲染
-		inline static ScenceRT _main_depth_RT;		// 主场景进行离屏渲染使用的深度附件
+		inline static std::vector<ScenceObjectIDRT> _object_id_RTs; // 场景 U32 ObjectID 渲染目标
+		inline static ScenceObjectIDRT _main_depth_RT;		// 主场景进行离屏渲染使用的深度附件
 		inline static VkFormat _mainRT_format = VK_FORMAT_UNDEFINED; // 主渲染作为离屏渲染时所用的 format （编辑器与渲染后期处理时会使用）
 		inline static VkExtent2D _mainRT_extent{ 0,0 }; // 离屏渲染大小
 
@@ -90,6 +123,10 @@ namespace INVENT
 		inline static std::vector<U_SS_BO> _point_light_buffers;
 		// binding 3 间接命令 (含每个批次的 drawCount)
 		inline static std::vector<U_SS_BO> _draw_count_and_indirect_buffers;	
+		// binding 5 鼠标悬停反馈实例id
+		inline static std::vector<U_SS_BO> _mouse_back_buffers;
+
+		inline static VkImageBarrierCacheMap* _image_barrier_cache_map = nullptr;
 
 		inline static VkClearValue _vk_clear{};
 
@@ -100,6 +137,7 @@ namespace INVENT
 
 		inline static std::uint32_t _image_index{ 0 };
 		inline static std::uint32_t _current_frame{ 0 };	// EndRender 用
+		inline static MousePosition _current_mouse_position{};
 		inline static bool _frame_skipped{ false };
 		inline static bool _swapchain_dirty{ false };
 		inline static bool _main_rt_extent_dirty{ false };
@@ -108,6 +146,8 @@ namespace INVENT
 		inline static IImgui::ImguiNewFrameFunc _imgui_new_frame_func = nullptr;
 		inline static IImgui::ImguiEndFrameAndFetchDataFunc _imgui_end_frame_and_fetch_func = nullptr;
 		inline static IImgui::ImguiRenderDrawDataFunc _imgui_draw_data_func = nullptr;
+		inline static GetCurrentViewWindowMousePositionFunc _get_current_mouse_position_func = nullptr;
+		inline static ReturnWorldPositionObjectIDFunc _return_world_position_obj_id_func = nullptr;
 		inline static void* _imgui_frame_data = nullptr;
 		inline static bool _use_imgui{ false };
 	};

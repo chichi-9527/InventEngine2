@@ -218,12 +218,14 @@ namespace INVENT
 				};
 
 			return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
-				&& deviceFeatures.geometryShader
-				&& deviceFeatures.samplerAnisotropy
-				&& _queue_family_indices.IsComplete() 
-				&& _queue_family_indices.HasTransferFamily // 必须有专业传输队列,若要实现同步传输,请更改
-				&& _check_device_extension_support(device)
-				&& swapChainAdequate();
+			&& deviceFeatures.geometryShader
+			&& deviceFeatures.samplerAnisotropy
+			&& deviceFeatures.independentBlend
+			&& deviceFeatures.dualSrcBlend
+			&& _queue_family_indices.IsComplete() 
+			&& _queue_family_indices.HasTransferFamily // 必须有专业传输队列,若要实现同步传输,请更改
+			&& _check_device_extension_support(device)
+			&& swapChainAdequate();
 			};
 
 		for (const auto& device : devices)
@@ -272,6 +274,8 @@ namespace INVENT
 
 		VkPhysicalDeviceFeatures deviceFeatures{};
 		deviceFeatures.samplerAnisotropy = VK_TRUE; // 允許紋理採樣器開啟各向異性過濾
+		deviceFeatures.independentBlend = VK_TRUE; // 允許每個顏色附件使用獨立的混合狀態
+		deviceFeatures.dualSrcBlend = VK_TRUE;      // 允許雙源混合因子
 
 		VkPhysicalDevice16BitStorageFeatures bit16Features{};
 		bit16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
@@ -602,10 +606,10 @@ namespace INVENT
 		uboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS; // 每幀需要 1 個，總共需要 maxAllocatedSets 個
 		poolSizes.push_back(uboPoolSize);
 
-		// 2. 為 Set 0 binding 1~4 的 buffer 規劃空間
+		// 2. 為 Set 0 除 binding 0 的 buffer 規劃空間
 		VkDescriptorPoolSize ssboPoolSize{};
 		ssboPoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		ssboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS * 4; // 每幀需要 4 個
+		ssboPoolSize.descriptorCount = IVulkan::MAX_ALLOCATED_SETS * _set0_binding_count; // 每幀需要
 		poolSizes.push_back(ssboPoolSize);
 
 		VkDescriptorPoolCreateInfo poolInfo{};
@@ -671,20 +675,21 @@ namespace INVENT
 		pointLightSSBOLayoutBinding.descriptorCount = 1;
 		pointLightSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pointLightSSBOLayoutBinding.pImmutableSamplers = nullptr;
+		++_set0_binding_count;
 		// binding 2 : 全場景物體實例總表 SSBO (存放所有 IVulkan::InstanceData)
 		VkDescriptorSetLayoutBinding instanceDataSSBOLayoutBinding{};
 		instanceDataSSBOLayoutBinding.binding = 2;
 		instanceDataSSBOLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		instanceDataSSBOLayoutBinding.descriptorCount = 1;
 		instanceDataSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // 頂點和計算著色器都需要
-
+		++_set0_binding_count;
 		// binding 3 : 間接繪製命令緩衝區 SSBO (Compute 寫入，Render 讀取)
 		VkDescriptorSetLayoutBinding indirectCommandSSBOLayoutBinding{};
 		indirectCommandSSBOLayoutBinding.binding = 3;
 		indirectCommandSSBOLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		indirectCommandSSBOLayoutBinding.descriptorCount = 1;
 		indirectCommandSSBOLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // 主要由 Compute Shader 寫入
-
+		++_set0_binding_count;
 		// binding 4 : 纹理流式 mip 反馈 SSBO
 		// 视锥裁剪 CS InterlockedMin 写 -> 帧末拷 readback -> CPU 下下帧读
 		VkDescriptorSetLayoutBinding mipFeedbackLayoutBinding{};
@@ -693,35 +698,50 @@ namespace INVENT
 		mipFeedbackLayoutBinding.descriptorCount = 1;
 		mipFeedbackLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 		mipFeedbackLayoutBinding.pImmutableSamplers = nullptr;
+		++_set0_binding_count;
+		// binding 5 : 鼠标悬停反馈
+		VkDescriptorSetLayoutBinding mouseBackLayoutBinding{};
+		mouseBackLayoutBinding.binding = 5;
+		mouseBackLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		mouseBackLayoutBinding.descriptorCount = 1;
+		mouseBackLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+		++_set0_binding_count;
+
 		std::vector<VkDescriptorSetLayoutBinding> set0Bindings = {
 			uboLayoutBinding,
 			pointLightSSBOLayoutBinding,
 			instanceDataSSBOLayoutBinding,
 			indirectCommandSSBOLayoutBinding,
-			mipFeedbackLayoutBinding
+			mipFeedbackLayoutBinding,
+			mouseBackLayoutBinding
 		};
 		auto set0Layout = _create_descriptor_set_layout(set0Bindings);
 
-		// Set1 Bindless Layout and Material SSBO
+		// Set1 Bindless Layout
 		// binding 0 : 全局采样器
 		VkDescriptorSetLayoutBinding globalSamplerLayoutBinding{};
 		globalSamplerLayoutBinding.binding = 0;
 		globalSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 		globalSamplerLayoutBinding.descriptorCount = 1;
-		globalSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		globalSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 		globalSamplerLayoutBinding.pImmutableSamplers = nullptr;
 		// binding 1 : 贴图阵列
 		VkDescriptorSetLayoutBinding textureListLayoutBinding{};
 		textureListLayoutBinding.binding = 1;
 		textureListLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 		textureListLayoutBinding.descriptorCount = _absolute_descriptor_limit;
-		textureListLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		textureListLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 		textureListLayoutBinding.pImmutableSamplers = nullptr;
 		std::vector<VkDescriptorSetLayoutBinding> set1Bindings = {
 			globalSamplerLayoutBinding,
 			textureListLayoutBinding
 		};
 		auto set1Layout = _create_descriptor_set_layout(set1Bindings, true);
+
+		// set2
+		// binding 0 : cube texture sampler
+
+		// binding 1 : cube texture bindless
 
 		_descriptor_set_layouts = {
 			set0Layout,
@@ -1041,10 +1061,29 @@ namespace INVENT
 			colorBlendAttachment.blendEnable = VK_FALSE;
 		}
 
+		// 第二颜色附件 (U32): 不混合, 直接写入
+		VkPipelineColorBlendAttachmentState secondBlendAttachment{};
+		secondBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
+
+		// 必须在外层作用域声明，避免悬空指针
+		VkPipelineColorBlendAttachmentState blendAttachments[2] = { colorBlendAttachment, secondBlendAttachment };
+
 		VkPipelineColorBlendStateCreateInfo colorBlending{};
 		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		colorBlending.attachmentCount = (config.FragmentShader == VK_NULL_HANDLE) ? 0 : 1;
-		colorBlending.pAttachments = &colorBlendAttachment;
+		if (config.FragmentShader == VK_NULL_HANDLE)
+		{
+			colorBlending.attachmentCount = 0;
+		}
+		else if (config.SecondColorAttachmentFormat != VK_FORMAT_UNDEFINED)
+		{
+			colorBlending.attachmentCount = 2;
+			colorBlending.pAttachments = blendAttachments;
+		}
+		else
+		{
+			colorBlending.attachmentCount = 1;
+			colorBlending.pAttachments = &colorBlendAttachment;
+		}
 
 		// 動態狀態
 		std::array<VkDynamicState, 2> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
@@ -1061,10 +1100,21 @@ namespace INVENT
 		// 核心：Vulkan 1.3+ 動態渲染結構體設定
 		VkPipelineRenderingCreateInfo pipelineRenderingCI{};
 		pipelineRenderingCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+		// 必须在外层作用域声明，避免悬空指针
+		VkFormat formats[2] = { config.ColorAttachmentFormat, config.SecondColorAttachmentFormat };
+
 		if (config.FragmentShader != VK_NULL_HANDLE)
 		{
-			pipelineRenderingCI.colorAttachmentCount = 1;
-			pipelineRenderingCI.pColorAttachmentFormats = &config.ColorAttachmentFormat;
+			if (config.SecondColorAttachmentFormat != VK_FORMAT_UNDEFINED)
+			{
+				pipelineRenderingCI.colorAttachmentCount = 2;
+				pipelineRenderingCI.pColorAttachmentFormats = formats;
+			}
+			else
+			{
+				pipelineRenderingCI.colorAttachmentCount = 1;
+				pipelineRenderingCI.pColorAttachmentFormats = &config.ColorAttachmentFormat;
+			}
 		}
 		else
 		{
