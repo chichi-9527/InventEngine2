@@ -147,6 +147,8 @@ namespace INVENT
 
 	void IVulkanRenderer::RegisterMouseWPositionObjGetFunc(EEngineThread target, MouseWorldPositionObjGetBackFunc func)
 	{
+		// 没有注册返回函数直接丢弃防止内存爆炸
+		if (_return_world_position_obj_id_func == nullptr) return;
 		std::unique_lock<std::shared_mutex> lock(PosOIDCallbacksMutex);
 		FramePosOIDCallbacks[_current_frame].emplace_back(func, target);
 	}

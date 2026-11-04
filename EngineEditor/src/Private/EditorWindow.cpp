@@ -7,6 +7,7 @@
 #include <IRenderThreadBase.h>
 #include <IEngine.h>
 #include <Memory/Memory.h>
+#include <IThread/IThreadPool.h>
 
 #include <filesystem>
 #include <chrono>
@@ -261,18 +262,28 @@ bool EditorWindow::Start()
             glfwGetCursorPos(EditorWindow::Instance().GetGLFWWindow(), &xpos, &ypos);
             //INVENT_LOG_DEBUG(std::format("EditorWindow::Instance().GetGLFWWindow() x: {}. y:{}.", xpos, ypos));
             // TODO 计算视窗中鼠标的位置
-
+            
             INVENT::MousePosition pos = { static_cast<float>(xpos), static_cast<float>(ypos) };
             return pos;
         }
     );
     INVENT::IRenderThreadBase::Instance().SetReturnWorldPositionObjectIDFunc(
-        [](INVENT::MouseWorldPositionObjGetBackFunc func, INVENT::Vec3 world_position, std::uint32_t object_id) {
-            INVENT_LOG_DEBUG(std::format("return data : posotion x: {}.\n y: {}.\n z: {}.\n obj id: {}.",
-                world_position.x, world_position.y, world_position.z,
-                object_id));
+        [](INVENT::EEngineThread target, INVENT::MouseWorldPositionObjGetBackFunc func, INVENT::Vec3 world_position, std::uint32_t object_id) {
 
-            // TODO : 执行 func 应该放入主线程队列
+            if (func == nullptr) return;
+
+            if (target == INVENT::EEngineThread::RenderThread)
+            {
+                INVENT_LOG_WARNING("MouseWorldPositionObjGetBackFunc 不能注册到渲染线程, 但你传入了 EEngineThread::RenderThread, 将注册到默认线程.");
+            }
+
+            if (target == INVENT::EEngineThread::WorkerThreadPool)
+            {
+                INVENT::IEngine::Instatnce().GetWorkThreadPool()->Submit(0, func, world_position, object_id);
+                return;
+            }
+
+            EditorWindow::Instance()._task_queue.Submit(func, world_position, object_id);
         }
     );
     
@@ -305,6 +316,8 @@ bool EditorWindow::Start()
         auto currentFrame = std::chrono::high_resolution_clock::now();
         deltaTime = std::chrono::duration<float>(currentFrame - lastFrame).count();
         lastFrame = currentFrame;
+
+        _task_queue.FlushAndExecute();
 
         Tick(deltaTime);
 
@@ -454,7 +467,12 @@ void EditorWindow::_cursor_position_callback(double xpos, double ypos)
 {
 
     
-    INVENT::IRenderThreadBase::Instance().RegisterMouseWPositionObjGetFunc(nullptr);
+    INVENT::IRenderThreadBase::Instance().RegisterMouseWPositionObjGetFunc(INVENT::EEngineThread::AnyThread, 
+        [](INVENT::Vec3 world_position, std::uint32_t object_id) {
+            INVENT_LOG_DEBUG(std::format("return data : posotion x: {}.\n y: {}.\n z: {}.\n obj id: {}.",
+                world_position.x, world_position.y, world_position.z,
+                object_id));
+        });
     // imgui
     ImGui::GetIO().AddMousePosEvent(static_cast<float>(xpos), static_cast<float>(ypos));
 }
