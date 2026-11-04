@@ -7,6 +7,7 @@
 
 namespace INVENT
 {
+	class IThreadPool;
 
 	class IEngine
 	{
@@ -27,9 +28,17 @@ namespace INVENT
 		// 宽高比，高度为 0 时也返回 0.0f
 		INVENT_API float GetWindowAspectRatio() const;
 
+		// 默认双线程单优先级
+		INVENT_API IThreadPool* GetWorkThreadPool() { return _work_pool; }
+
 		std::atomic_bool& GetWindowSizeResized();
 		std::atomic_bool& GetEngineShouldExit();
 	private:
+		void _init_thread_pools();
+		void _clear();
+		
+	private:
+		IThreadPool* _work_pool = nullptr;
 		std::uint32_t _window_width{ 0 };
 		std::uint32_t _window_height{ 0 };
 		std::atomic_bool _window_size_resized = false;

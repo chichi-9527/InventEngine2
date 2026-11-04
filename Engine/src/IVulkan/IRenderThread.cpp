@@ -39,9 +39,9 @@ namespace INVENT
 		IVulkanRenderer::SetReturnWorldPositionObjectIDFunc(func);
 	}
 
-	void IRenderThreadBase::RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func)
+	void IRenderThreadBase::RegisterMouseWPositionObjGetFunc(EEngineThread target, MouseWorldPositionObjGetBackFunc func)
 	{
-		IVulkanRenderer::RegisterMouseWPositionObjGetFunc(func);
+		IVulkanRenderer::RegisterMouseWPositionObjGetFunc(target, func);
 	}
 
 	bool IRenderThread::Init()

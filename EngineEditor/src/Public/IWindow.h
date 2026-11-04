@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 
+#include <Memory/ISafeTaskQueue.h>
+
 #include <cstdint>
 #include <string>
 #include <atomic>
@@ -47,6 +49,8 @@ namespace INVENT
 		GLFWwindow* _glfw_window = nullptr;
 		GLFWmonitor* _glfw_monitor = nullptr;
 		const GLFWvidmode* _glfw_vidmode = nullptr;
+
+		INVENT::ISafeTaskQueue _task_queue{};
 
 		WindowSize _window_size{};
 

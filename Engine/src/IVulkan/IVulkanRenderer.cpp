@@ -80,7 +80,11 @@ namespace INVENT
 	};
 	static std::array<std::vector<DestroyRT>, IVulkan::MAX_FRAMES_IN_FLIGHT + 1> FrameDestroyRing;
 	static std::uint32_t _destroy_cursor = 0;
-	static std::array<std::vector<MouseWorldPositionObjGetBackFunc>, IVulkan::MAX_FRAMES_IN_FLIGHT> FramePosOIDCallbacks;
+	struct MouseWorldPositionObjGetBackPackage {
+		MouseWorldPositionObjGetBackFunc func = nullptr;
+		EEngineThread target = EEngineThread::AnyThread;
+	};
+	static std::array<std::vector<MouseWorldPositionObjGetBackPackage>, IVulkan::MAX_FRAMES_IN_FLIGHT> FramePosOIDCallbacks;
 	static std::shared_mutex PosOIDCallbacksMutex;
 
 	bool IVulkanRenderer::Init()
@@ -141,10 +145,10 @@ namespace INVENT
 		return true;
 	}
 
-	void IVulkanRenderer::RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func)
+	void IVulkanRenderer::RegisterMouseWPositionObjGetFunc(EEngineThread target, MouseWorldPositionObjGetBackFunc func)
 	{
 		std::unique_lock<std::shared_mutex> lock(PosOIDCallbacksMutex);
-		FramePosOIDCallbacks[_current_frame].push_back(func);
+		FramePosOIDCallbacks[_current_frame].emplace_back(func, target);
 	}
 
 	bool IVulkanRenderer::_init_buffers()
@@ -340,9 +344,9 @@ namespace INVENT
 
 		IVulkan::ObjectIDGetBack* back = reinterpret_cast<IVulkan::ObjectIDGetBack*>(mBuffer.mapped);
 
-		for (auto callback : callbacks)
+		for (auto& callback : callbacks)
 		{
-			_return_world_position_obj_id_func(callback,
+			_return_world_position_obj_id_func(callback.target, callback.func,
 				{ back->wPosition.x, back->wPosition.y, back->wPosition.z },
 				back->objectID);
 		}
@@ -1236,6 +1240,7 @@ namespace INVENT
 		}
 
 		if (_main_opaque_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _main_opaque_pipeline, nullptr); _main_opaque_pipeline = VK_NULL_HANDLE; }
+		if (_object_id_compute_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _object_id_compute_pipeline, nullptr); _object_id_compute_pipeline = VK_NULL_HANDLE; }
 		if (_compute_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _compute_pipeline, nullptr); _compute_pipeline = VK_NULL_HANDLE; }
 		if (_global_sampler != VK_NULL_HANDLE) { vkDestroySampler(device, _global_sampler, nullptr); _global_sampler = VK_NULL_HANDLE; }
 

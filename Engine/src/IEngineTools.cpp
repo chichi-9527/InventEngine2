@@ -103,19 +103,19 @@ namespace INVENT
 
 	void IEngineTools::_init_threadpools()
 	{
-		_work_thread_pool = new IThreadPool(1, 1);
-		_work_thread_pool->Start();
+		__texture_work_thread_pool = new IThreadPool(1, 1);
+		__texture_work_thread_pool->Start();
 		_allocator_thread_pool = new IThreadPool();
 		_allocator_thread_pool->Start();
 	}
 
 	void IEngineTools::_clear_threadpools()
 	{
-		if (_work_thread_pool)
+		if (__texture_work_thread_pool)
 		{
-			_work_thread_pool->Shutdown();
-			delete _work_thread_pool;
-			_work_thread_pool = nullptr;
+			__texture_work_thread_pool->Shutdown();
+			delete __texture_work_thread_pool;
+			__texture_work_thread_pool = nullptr;
 		}
 		if (_allocator_thread_pool)
 		{

@@ -47,7 +47,7 @@ namespace INVENT
 		void SetCurrentViewWindowMousePositionFunc(GetCurrentViewWindowMousePositionFunc func);
 		void SetReturnWorldPositionObjectIDFunc(ReturnWorldPositionObjectIDFunc func);
 
-		void RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func);
+		void RegisterMouseWPositionObjGetFunc(EEngineThread target, MouseWorldPositionObjGetBackFunc func);
 
 		void OnViewportResize(std::uint32_t w, std::uint32_t h);
 

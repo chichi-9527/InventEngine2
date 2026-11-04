@@ -32,5 +32,5 @@ namespace INVENT
 	};
 	using GetCurrentViewWindowMousePositionFunc = MousePosition(*)();
 
-	using ReturnWorldPositionObjectIDFunc = void(*)(MouseWorldPositionObjGetBackFunc callback, Vec3 position, std::uint32_t object_id);
+	using ReturnWorldPositionObjectIDFunc = void(*)(EEngineThread target, MouseWorldPositionObjGetBackFunc callback, Vec3 position, std::uint32_t object_id);
 }

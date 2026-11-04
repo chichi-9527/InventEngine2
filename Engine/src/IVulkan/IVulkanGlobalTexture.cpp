@@ -318,7 +318,7 @@ namespace INVENT
 			return handle;
 		}
 
-		IEngineTools::Instance().GetWorkThreadPool()->Submit(0, [this, handle, name, path, gen]() {
+		IEngineTools::Instance().GetTextureWorkThreadPool()->Submit(0, [this, handle, name, path, gen]() {
 
 			auto pool = IEngineTools::Instance().GetMemPoolPool();
 

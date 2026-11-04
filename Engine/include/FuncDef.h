@@ -7,5 +7,12 @@
 namespace INVENT
 {
 	using MouseWorldPositionObjGetBackFunc = void(*)(Vec3 position, std::uint32_t objID);
+	enum class EEngineThread
+	{
+		GameThread,
+		RenderThread,
+		WorkerThreadPool,
+		AnyThread			// 默认线程
+	};
 
 }

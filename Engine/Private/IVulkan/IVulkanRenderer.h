@@ -73,7 +73,7 @@ namespace INVENT
 		static void SetCurrentViewWindowMousePositionFunc(GetCurrentViewWindowMousePositionFunc func) { _get_current_mouse_position_func = func; }
 		static void SetReturnWorldPositionObjectIDFunc(ReturnWorldPositionObjectIDFunc func) { _return_world_position_obj_id_func = func; }
 
-		static void RegisterMouseWPositionObjGetFunc(MouseWorldPositionObjGetBackFunc func);
+		static void RegisterMouseWPositionObjGetFunc(EEngineThread target, MouseWorldPositionObjGetBackFunc func);
 
 		static void SetClearColor(VkClearColorValue v) { _vk_clear.color = v; }
 	private:

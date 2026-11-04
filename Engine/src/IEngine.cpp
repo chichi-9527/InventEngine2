@@ -1,6 +1,7 @@
 ﻿#include "IEngine.h"
 
 #include "IEngineTools.h"
+#include "IThread/IThreadPool.h"
 
 namespace INVENT
 {
@@ -14,6 +15,7 @@ namespace INVENT
 	void IEngine::Init()
 	{
 		IEngineTools::Instance().Init();
+		_init_thread_pools();
 	}
 	void IEngine::Shutdown()
 	{
@@ -51,6 +53,19 @@ namespace INVENT
 	std::atomic_bool& IEngine::GetEngineShouldExit()
 	{
 		return _engine_should_exit;
+	}
+	void IEngine::_init_thread_pools()
+	{
+		_work_pool = new IThreadPool(2, 1);
+		_work_pool->Start();
+	}
+	void IEngine::_clear()
+	{
+		if (_work_pool != nullptr)
+		{
+			delete _work_pool;
+			_work_pool = nullptr;
+		}
 	}
 }
 
