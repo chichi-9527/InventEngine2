@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "EngineAPI.h"
+#include "IMath/IMathematics.h"
 
 #include <cstdint>
 #include <atomic>
@@ -39,6 +40,9 @@ namespace INVENT
 		
 	private:
 		IThreadPool* _work_pool = nullptr;
+
+		DVec3 _current_world_center{ 0.0 };
+
 		std::uint32_t _window_width{ 0 };
 		std::uint32_t _window_height{ 0 };
 		std::atomic_bool _window_size_resized = false;
