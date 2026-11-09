@@ -11,7 +11,8 @@
     #else
         #define INVENT_API __declspec(dllimport)
     #endif // EXPORTING_ENGINE
-    #define INVENT_DLL __stdcall
+    //old: #define INVENT_DLL __stdcall, always x64
+    #define INVENT_DLL
 #else
     #if __GNUC__ >= 4
         #define INVENT_API __attribute__((visibility("default")))
@@ -23,6 +24,8 @@
 
 #endif // INVENT_STATIC
 
+#define IEngine_OUT
+#define IEngine_IN
 
 
 
