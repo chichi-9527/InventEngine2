@@ -2,6 +2,7 @@
 
 #include "EngineAPI.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace INVENT
@@ -258,7 +259,7 @@ namespace INVENT
 		explicit base_mat3x3(T s) : vecs{ {s, T(0), T(0)}, {T(0), s, T(0)}, {T(0), T(0), s} } {}
 		base_mat3x3(const base_vec3<T>& v0, const base_vec3<T>& v1, const base_vec3<T>& v2) : vecs{ v0, v1, v2 } {}
 		template<typename U> 
-		explicit base_mat3x3(const base_mat3x3<U>& m) : vecs{ base_vec3<T>(m[0]), base_vec3<T>(m[1]), base_vec3<2>(m[2])} {}
+		explicit base_mat3x3(const base_mat3x3<U>& m) : vecs{ base_vec3<T>(m[0]), base_vec3<T>(m[1]), base_vec3<T>(m[2])} {}
 
 		const base_vec3<T>& operator[](size_t idx) const { return vecs[idx]; }
 		base_vec3<T>& operator[](size_t idx) { return vecs[idx]; }
@@ -386,8 +387,8 @@ namespace INVENT
 		base_quat<T> operator*(T s) const { return { w * s, x * s, y * s, z * s }; }
 		base_quat<T> operator/(T s) const { return { w / s, x / s, y / s, z / s }; }
 		base_quat<T>& operator+=(const base_quat<T>& o) { x += o.x; y += o.y; z += o.z; w += o.w; return *this; }
-		base_quat<T>& operator-=(const base_quat<T>& o) { x -= o.x; y -= o.y; z -= o.z; w -= o.w; return this; }
-		base_quat<T>& operator=(T s) { x *= s; y *= s; z *= s; w *= s; return *this; }
+		base_quat<T>& operator-=(const base_quat<T>& o) { x -= o.x; y -= o.y; z -= o.z; w -= o.w; return *this; }
+		base_quat<T>& operator*=(T s) { x *= s; y *= s; z *= s; w *= s; return *this; }
 		base_quat<T>& operator/=(T s) { x /= s; y /= s; z /= s; w /= s; return *this; }
 		bool operator==(const base_quat<T>& o) const { return x == o.x && y == o.y && z == o.z && w == o.w; }
 		bool operator!=(const base_quat<T>& o) const { return !(*this == o); }
@@ -625,11 +626,158 @@ namespace INVENT
 	}
 }
 
+// =========================================================================
+// C ABI (供 C# / 其他語言 P/Invoke 使用)
+// 命名規則：InventMath + 類別 + 操作 + F(float)/D(double)
+// =========================================================================
+
+#define INVENT_C_API_VEC2(SUFFIX, VT, ST) \
+    INVENT_API void INVENT_DLL InventMathVec2Add##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec2Sub##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec2Mul##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec2Div##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec2MulScalar##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* v, IEngine_IN ST s); \
+    INVENT_API void INVENT_DLL InventMathVec2Length##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec2LengthSq##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec2Distance##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec2Normalize##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec2Dot##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec2Reflect##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* incident, IEngine_IN INVENT::VT* normal); \
+    INVENT_API void INVENT_DLL InventMathVec2Lerp##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b, IEngine_IN ST t); \
+    INVENT_API void INVENT_DLL InventMathVec2Clamp##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* val, IEngine_IN INVENT::VT* minVal, IEngine_IN INVENT::VT* maxVal);
+
+#define INVENT_C_API_VEC3(SUFFIX, VT, ST) \
+    INVENT_API void INVENT_DLL InventMathVec3Add##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec3Sub##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec3Mul##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec3Div##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec3MulScalar##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* v, IEngine_IN ST s); \
+    INVENT_API void INVENT_DLL InventMathVec3Length##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec3LengthSq##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec3Distance##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec3Normalize##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec3Dot##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec3Cross##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec3Reflect##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* incident, IEngine_IN INVENT::VT* normal); \
+    INVENT_API void INVENT_DLL InventMathVec3Lerp##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b, IEngine_IN ST t); \
+    INVENT_API void INVENT_DLL InventMathVec3Clamp##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* val, IEngine_IN INVENT::VT* minVal, IEngine_IN INVENT::VT* maxVal);
+
+#define INVENT_C_API_VEC4(SUFFIX, VT, ST) \
+    INVENT_API void INVENT_DLL InventMathVec4Add##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec4Sub##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec4Mul##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec4Div##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec4MulScalar##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* v, IEngine_IN ST s); \
+    INVENT_API void INVENT_DLL InventMathVec4Length##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec4LengthSq##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec4Distance##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec4Normalize##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathVec4Dot##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b); \
+    INVENT_API void INVENT_DLL InventMathVec4Lerp##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* a, IEngine_IN INVENT::VT* b, IEngine_IN ST t); \
+    INVENT_API void INVENT_DLL InventMathVec4Clamp##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::VT* val, IEngine_IN INVENT::VT* minVal, IEngine_IN INVENT::VT* maxVal);
+
+#define INVENT_C_API_MAT2(SUFFIX, MT, VT, ST) \
+    INVENT_API void INVENT_DLL InventMathTwoMat2Multiply##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* a, IEngine_IN INVENT::MT* b); \
+    INVENT_API void INVENT_DLL InventMathMat2MultiplyVec2##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::MT* m, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathMat2Inverse##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m); \
+    INVENT_API void INVENT_DLL InventMathMat2Transpose##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m); \
+    INVENT_API void INVENT_DLL InventMathMat2Determinant##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::MT* m);
+
+#define INVENT_C_API_MAT3(SUFFIX, MT, VT, ST) \
+    INVENT_API void INVENT_DLL InventMathTwoMat3Multiply##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* a, IEngine_IN INVENT::MT* b); \
+    INVENT_API void INVENT_DLL InventMathMat3MultiplyVec3##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::MT* m, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathMat3Inverse##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m); \
+    INVENT_API void INVENT_DLL InventMathMat3Transpose##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m); \
+    INVENT_API void INVENT_DLL InventMathMat3Determinant##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::MT* m);
+
+#define INVENT_C_API_MAT4(SUFFIX, MT, VT, ST) \
+    INVENT_API void INVENT_DLL InventMathTwoMat4Multiply##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* a, IEngine_IN INVENT::MT* b); \
+    INVENT_API void INVENT_DLL InventMathMat4MultiplyVec4##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::MT* m, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathMat4Inverse##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m); \
+    INVENT_API void INVENT_DLL InventMathMat4Transpose##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m); \
+    INVENT_API void INVENT_DLL InventMathMat4Determinant##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::MT* m);
+
+#define INVENT_C_API_MAT4_EXTRA(SUFFIX, MT, VT, QT, ST) \
+    INVENT_API void INVENT_DLL InventMathMat4Translate##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathMat4Rotate##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m, IEngine_IN ST angleRadians, IEngine_IN INVENT::VT* axis); \
+    INVENT_API void INVENT_DLL InventMathMat4Scale##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::MT* m, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathMat4ComposeTransform##SUFFIX(IEngine_OUT INVENT::MT* out, IEngine_IN INVENT::VT* translation, IEngine_IN INVENT::QT* rotation, IEngine_IN INVENT::VT* scale); \
+    INVENT_API void INVENT_DLL InventMathMat4DecomposeTransform##SUFFIX(IEngine_OUT int* outOk, IEngine_OUT INVENT::VT* outTranslation, IEngine_OUT INVENT::QT* outRotation, IEngine_OUT INVENT::VT* outScale, IEngine_IN INVENT::MT* transform);
+
+#define INVENT_C_API_QUAT(SUFFIX, QT, VT, MT3, MT4, ST) \
+    INVENT_API void INVENT_DLL InventMathQuatMultiply##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::QT* a, IEngine_IN INVENT::QT* b); \
+    INVENT_API void INVENT_DLL InventMathQuatRotateVec3##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::QT* q, IEngine_IN INVENT::VT* v); \
+    INVENT_API void INVENT_DLL InventMathQuatNormalize##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::QT* q); \
+    INVENT_API void INVENT_DLL InventMathQuatInverse##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::QT* q); \
+    INVENT_API void INVENT_DLL InventMathQuatConjugate##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::QT* q); \
+    INVENT_API void INVENT_DLL InventMathQuatDot##SUFFIX(IEngine_OUT ST* out, IEngine_IN INVENT::QT* a, IEngine_IN INVENT::QT* b); \
+    INVENT_API void INVENT_DLL InventMathQuatSlerp##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::QT* a, IEngine_IN INVENT::QT* b, IEngine_IN ST t); \
+    INVENT_API void INVENT_DLL InventMathQuatFromAxisAngle##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::VT* axis, IEngine_IN ST angleRadians); \
+    INVENT_API void INVENT_DLL InventMathQuatFromEuler##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::VT* eulerRadians); \
+    INVENT_API void INVENT_DLL InventMathQuatToEuler##SUFFIX(IEngine_OUT INVENT::VT* out, IEngine_IN INVENT::QT* q); \
+    INVENT_API void INVENT_DLL InventMathQuatLookRotation##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::VT* forward, IEngine_IN INVENT::VT* up); \
+    INVENT_API void INVENT_DLL InventMathQuatToMat3##SUFFIX(IEngine_OUT INVENT::MT3* out, IEngine_IN INVENT::QT* q); \
+    INVENT_API void INVENT_DLL InventMathQuatToMat4##SUFFIX(IEngine_OUT INVENT::MT4* out, IEngine_IN INVENT::QT* q); \
+    INVENT_API void INVENT_DLL InventMathMat3ToQuat##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::MT3* m); \
+    INVENT_API void INVENT_DLL InventMathMat4ToQuat##SUFFIX(IEngine_OUT INVENT::QT* out, IEngine_IN INVENT::MT4* m);
+
 #ifdef __cplusplus
 extern "C"
 {
-#endif // _cplusplus
-	INVENT_API void INVENT_DLL InventMathTwoMat2MultiplyF(IEngine_OUT INVENT::Mat2* out, IEngine_IN INVENT::Mat2* mat1, IEngine_IN INVENT::Mat2* mat2);
+#endif // __cplusplus
+
+	// 純量
+	INVENT_API void INVENT_DLL InventMathLerpF(float* out, float a, float b, float t);
+	INVENT_API void INVENT_DLL InventMathLerpD(double* out, double a, double b, double t);
+
+	INVENT_API void INVENT_DLL InventMathClampF(float* out, float val, float minVal, float maxVal);
+	INVENT_API void INVENT_DLL InventMathClampD(double* out, double val, double minVal, double maxVal);
+
+	INVENT_API void INVENT_DLL InventMathSmoothStepF(float* out, float edge0, float edge1, float x);
+	INVENT_API void INVENT_DLL InventMathSmoothStepD(double* out, double edge0, double edge1, double x);
+
+	INVENT_API void INVENT_DLL InventMathRadiansF(float* out, float degrees);
+	INVENT_API void INVENT_DLL InventMathRadiansD(double* out, double degrees);
+
+	INVENT_API void INVENT_DLL InventMathDegreesF(float* out, float radians);
+	INVENT_API void INVENT_DLL InventMathDegreesD(double* out, double radians);
+
+	// 向量
+	INVENT_C_API_VEC2(F, Vec2, float)
+		INVENT_C_API_VEC2(D, DVec2, double)
+
+		INVENT_C_API_VEC3(F, Vec3, float)
+		INVENT_C_API_VEC3(D, DVec3, double)
+
+		INVENT_C_API_VEC4(F, Vec4, float)
+		INVENT_C_API_VEC4(D, DVec4, double)
+
+		// 矩陣
+		INVENT_C_API_MAT2(F, Mat2, Vec2, float)
+		INVENT_C_API_MAT2(D, DMat2, DVec2, double)
+
+		INVENT_C_API_MAT3(F, Mat3, Vec3, float)
+		INVENT_C_API_MAT3(D, DMat3, DVec3, double)
+
+		INVENT_C_API_MAT4(F, Mat4, Vec4, float)
+		INVENT_C_API_MAT4(D, DMat4, DVec4, double)
+
+		INVENT_C_API_MAT4_EXTRA(F, Mat4, Vec3, Quat, float)
+		INVENT_C_API_MAT4_EXTRA(D, DMat4, DVec3, DQuat, double)
+
+		// 四元數
+		INVENT_C_API_QUAT(F, Quat, Vec3, Mat3, Mat4, float)
+		INVENT_C_API_QUAT(D, DQuat, DVec3, DMat3, DMat4, double)
+
 #ifdef __cplusplus
 }
-#endif // _cplusplus
+#endif // __cplusplus
+
+#undef INVENT_C_API_VEC2
+#undef INVENT_C_API_VEC3
+#undef INVENT_C_API_VEC4
+#undef INVENT_C_API_MAT2
+#undef INVENT_C_API_MAT3
+#undef INVENT_C_API_MAT4
+#undef INVENT_C_API_MAT4_EXTRA
+#undef INVENT_C_API_QUAT
