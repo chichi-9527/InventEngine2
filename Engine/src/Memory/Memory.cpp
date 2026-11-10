@@ -28,9 +28,20 @@ namespace INVENT
 	{
 		if (_manager)
 		{
-			for (auto& ptr : *_manager)
+			for (auto& [ptr, data] : *_manager)
 			{
-				
+				auto p = reinterpret_cast<void*>(ptr);
+				if (p != nullptr)
+				{
+					if (data.FromPool)
+					{
+						IEngineTools::Instance().GetMemPoolPool()->DestroyOnlyFixed(p, static_cast<size_t>(data.ByteSize));
+					}
+					else
+					{
+						::operator delete(p, std::align_val_t{ static_cast<size_t>(data.Alignment) });
+					}
+				}
 			}
 			delete _manager;
 			_manager = nullptr;
