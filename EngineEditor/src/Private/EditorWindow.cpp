@@ -93,8 +93,8 @@ EditorWindow& EditorWindow::Instance()
 
 bool EditorWindow::Start()
 {
-    INVENT::IEngine::Instatnce().Init();
-    if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
+    if (!INVENT::IEngine::Instatnce().Init()) return false;
+
     Editor::ImguiContext = ImGui::CreateContext();
     Editor::CapturedDrawDatas.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), nullptr);
     Editor::CachedImageViews.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), VK_NULL_HANDLE);
@@ -349,7 +349,6 @@ bool EditorWindow::Start()
     UnLoadGame();
 //#endif
 
-    INVENT::EngineAllocator::Clear();
     INVENT::IEngine::Instatnce().Shutdown();
     return true;
 }

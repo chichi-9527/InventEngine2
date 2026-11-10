@@ -2,6 +2,7 @@
 
 #include "IEngineTools.h"
 #include "IThread/IThreadPool.h"
+#include "Memory/Memory.h"
 
 namespace INVENT
 {
@@ -12,13 +13,15 @@ namespace INVENT
 		return e;
 	}
 
-	void IEngine::Init()
+	bool IEngine::Init()
 	{
 		IEngineTools::Instance().Init();
 		_init_thread_pools();
+		if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
 	}
 	void IEngine::Shutdown()
 	{
+		INVENT::EngineAllocator::Clear();
 		IEngineTools::Instance().Clear();
 	}
 

@@ -43,8 +43,7 @@ namespace Starter
 
 bool StarterWindow::Start()
 {
-    INVENT::IEngine::Instatnce().Init();
-    if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
+    if (!INVENT::IEngine::Instatnce().Init()) return false;
 
     //
     if (!GetGameProjects())
@@ -103,7 +102,6 @@ bool StarterWindow::Start()
     End();
     UnLoadGame();
 
-    INVENT::EngineAllocator::Clear();
     INVENT::IEngine::Instatnce().Shutdown();
     return true;
 }

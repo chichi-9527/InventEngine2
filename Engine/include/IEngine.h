@@ -17,7 +17,7 @@ namespace INVENT
 		~IEngine() = default;
 
 		static INVENT_API IEngine& Instatnce();
-		INVENT_API void Init();
+		INVENT_API bool Init();
 		INVENT_API void Shutdown();
 		
 		INVENT_API const char* GetRunPath() const noexcept;
