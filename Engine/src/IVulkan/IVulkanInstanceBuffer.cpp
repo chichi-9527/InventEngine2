@@ -14,33 +14,22 @@ namespace INVENT
 {
 	static IMemPoolAllocatorOnlyFixedBlock<IVulkan::Batch> Allocator;
 
-	bool InstanceBuffer::Init(const std::vector<uint32_t>& other_batches)
+	bool InstanceBuffer::Init(std::uint32_t default_batch_num)
 	{
 		if (_is_valid) return false;
-
-		if (other_batches.size() >= static_cast<size_t>(IVulkan::MAX_INSTANCE_BATCH_COUNT))
-		{
-			INVENT_LOG_ERROR(std::format("[InstanceBuffer] batch count(includes default) greater than MAX_INSTANCE_BATCH_COUNT: {}.", IVulkan::MAX_INSTANCE_BATCH_COUNT));
-			INVENT_LOG_WARNING("[InstanceBuffer] if you want to increase IVulkan::MAX_INSTANCE_BATCH_COUNT,"
-				"you must to change shader file drawCount count and IVulkanRanderer::_draw_count_and_indirect_buffer size.");
-			return false;
-		}
 
 		Allocator = IMemPoolAllocatorOnlyFixedBlock<IVulkan::Batch>{ IEngineTools::Instance().GetMemPoolPool() };
 		// calculate buffer size
 		std::uint32_t maxInstanceNum = static_cast<uint32_t>(uint64_t{ IVulkan::MaxSSBORange } / sizeof(InstanceData));
 		_current_instance_num = std::min(IVulkan::EXPECTED_INSTANCE_SIZE, maxInstanceNum);
 		INVENT_LOG_INFO(std::format("[InstanceBuffer] Max instance num: {}.", _current_instance_num));
-		auto allOthers = std::accumulate(other_batches.begin(), other_batches.end(), uint32_t{ 0 });
-		if (allOthers > _current_instance_num)
+
+		if (default_batch_num > _current_instance_num)
 		{
-			INVENT_LOG_ERROR("[InstanceBuffer] other batches too big."); 
+			INVENT_LOG_ERROR("[InstanceBuffer] default batches too big."); 
 			return false;
 		}
-		if (_current_instance_num - allOthers < 10 * 1024)
-		{
-			INVENT_LOG_WARNING(std::format("[InstanceBuffer] 默认批次（普通不透明批次）的实例数量只有 {} 个.", _current_instance_num - allOthers));
-		}
+
 		// init vkbuffer
 		if (VkResult res = IVulkanBase::Base().UseVmaCreateBuffer(static_cast<VkDeviceSize>(_current_instance_num) * sizeof(InstanceData),
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -59,27 +48,13 @@ namespace INVENT
 			return false;
 		}
 		auto defaultBatch = ::new (defPtr) IVulkan::Batch();
+		defaultBatch->Offset = 0u;
+		defaultBatch->Count = default_batch_num;
+		defaultBatch->_valids.ResizeBitCount(default_batch_num);
 		_batches.push_back(defaultBatch);
-		uint32_t offset{ 0 };
-		for (auto num : other_batches)
-		{
-			auto ptr = Allocator.allocate(1);
-			if (ptr == nullptr)
-			{
-				INVENT_LOG_ERROR("[InstanceBuffer] Allocator allocate error!");
-				return false;
-			}
-			IVulkan::Batch* batch = ::new (ptr) IVulkan::Batch();
-			batch->Count = num;
-			batch->_valids.ResizeBitCount(num);
-			batch->Offset = offset;
-			_batches.push_back(batch);
 
-			offset += num;
-		}
-		defaultBatch->Offset = offset;
-		defaultBatch->Count = _current_instance_num - allOthers;
-		defaultBatch->_valids.ResizeBitCount(_current_instance_num - allOthers);
+		_offset = default_batch_num;
+		_no_team_instance_num = _current_instance_num - default_batch_num;
 
 		_is_valid = true;
 		return true;
@@ -105,6 +80,40 @@ namespace INVENT
 		_is_valid = false;
 	}
 
+	InstanceBuffer::BatchHandle InstanceBuffer::AddBatch(std::uint32_t instance_num)
+	{
+		if (_batches.size() + 1 >= static_cast<size_t>(IVulkan::MAX_INSTANCE_BATCH_COUNT))
+		{
+			INVENT_LOG_ERROR(std::format("[InstanceBuffer] batch count(includes default) greater than MAX_INSTANCE_BATCH_COUNT: {}.", IVulkan::MAX_INSTANCE_BATCH_COUNT));
+			INVENT_LOG_WARNING("[InstanceBuffer] if you want to increase IVulkan::MAX_INSTANCE_BATCH_COUNT,"
+				"you must to change shader file drawCount count and IVulkanRanderer::_draw_count_and_indirect_buffer size.");
+			return IIBHANDLE_INVALID;
+		}
+		if (instance_num > _no_team_instance_num)
+		{
+			INVENT_LOG_ERROR(std::format("[InstanceBuffer] New batch needed instance num > no team instance num. need cout: {}. no team count: {}.",
+				instance_num, _no_team_instance_num));
+			return IIBHANDLE_INVALID;
+		}
+		
+		auto ptr = Allocator.allocate(1);
+		if (ptr == nullptr)
+		{
+			INVENT_LOG_ERROR("[InstanceBuffer] Allocator allocate error!");
+			return false;
+		}
+		IVulkan::Batch* batch = ::new (ptr) IVulkan::Batch();
+		batch->Count = instance_num;
+		batch->_valids.ResizeBitCount(instance_num);
+		batch->Offset = _offset;
+		_batches.push_back(batch);
+
+		_offset += instance_num;
+		_no_team_instance_num -= instance_num;
+
+		return static_cast<BatchHandle>(_batches.size());
+	}
+
 	uint32_t InstanceBuffer::GetOffset(size_t batch_index)
 	{
 		if (batch_index >= _batches.size()) return UINT32_MAX;
@@ -123,7 +132,7 @@ namespace INVENT
 		return batch->UsedHighWaterMark;
 	}
 
-	InstanceBuffer::Handle InstanceBuffer::AddInstanceData(const InstanceData& data, uint32_t batch_index)
+	InstanceBuffer::Handle InstanceBuffer::AddInstanceData(const InstanceData& data, BatchHandle batch_index)
 	{
 		if (batch_index >= _batches.size()) return Handle{};
 		auto batch = _batches[batch_index];

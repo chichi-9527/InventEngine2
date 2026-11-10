@@ -60,28 +60,38 @@ namespace INVENT
 		static_assert(offsetof(InstanceData, InstanceOptionFlags) == 156);
 		static_assert(offsetof(InstanceData, LevelID) == 158);
 
+		using BatchHandle = std::uint32_t;
+		constexpr static std::uint32_t IIBHANDLE_INVALID = UINT32_MAX;
+		constexpr static std::uint32_t DefBatchHandle = 0u;
 		struct Handle 
 		{
-			uint32_t batchIndex{ UINT32_MAX };
+			BatchHandle batchIndex{ IIBHANDLE_INVALID };
 			IHandle ihandle{};
-			bool IsValid() const noexcept { return batchIndex != UINT32_MAX && ihandle.IsValid(); }
+			bool IsValid() const noexcept { return batchIndex != IIBHANDLE_INVALID && ihandle.IsValid(); }
 			uint32_t GetInstanceIndex() const noexcept { return static_cast<uint32_t>(ihandle.GetRealIndex()); }
 		};
 	public:
 		/// <param name="other_batches_num">
-		/// 除默认批次外的其他批次实体数量，所有批次加在一起等于帧渲染上限
+		/// 默认批次的实体数量
 		/// batch_index = 0 代表預設批次然后顺延
 		/// </param>
 		/// <returns></returns>
-		static bool Init(const std::vector<uint32_t>& other_batches = {});
+		static bool Init(std::uint32_t default_batch_num = 1024);
 		static void Destroy();
+
+		// 返回此批次 id: betch_index, 失败返回 IIBHANDLE_INVALID
+		static BatchHandle AddBatch(std::uint32_t instance_num);
+		// 返回还未分配的实例数量，即可分配的实例数量
+		static std::uint32_t GetNoTeamNum() { return _no_team_instance_num; }
+		// 所有已注册批次数量（包括初始化时的初始批次）
+		static std::uint32_t GetBatchesCount() { return static_cast<std::uint32_t>(_batches.size()); }
 
 		/// <returns> 失败会返回 UINT32_MAX </returns>
 		static uint32_t GetOffset(size_t batch_index);
 		/// <returns> 失败会返回 UINT32_MAX </returns>
 		static uint32_t GetUsedHighWaterMark(size_t batch_index);
 
-		static Handle AddInstanceData(const InstanceData& data, uint32_t batch_index = 0);
+		static Handle AddInstanceData(const InstanceData& data, BatchHandle batch_index = 0);
 		static void UpdateInstanceData(const InstanceData& data, Handle handle);
 		static void FreeInstanceData(Handle handle);
 
@@ -93,6 +103,8 @@ namespace INVENT
 		inline static std::vector<IVulkan::Batch*> _batches; // 保存所有批次的偏移
 		inline static void* _mapped_data = nullptr;
 		inline static uint32_t _current_instance_num{ 0 };
+		inline static uint32_t _offset{ 0 };
+		inline static uint32_t _no_team_instance_num{ 0 };
 
 		inline static bool _is_valid{ false };
 	};
