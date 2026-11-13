@@ -3,6 +3,7 @@
 #include "IEngineTools.h"
 #include "IThread/IThreadPool.h"
 #include "Memory/Memory.h"
+#include "ISharedPtr/ISharedPtr.h"
 
 namespace INVENT
 {
@@ -18,9 +19,12 @@ namespace INVENT
 		IEngineTools::Instance().Init();
 		_init_thread_pools();
 		if (!INVENT::EngineAllocator::Init() || !INVENT::EngineAllocator::IsReady()) return false;
+		ITools::IPtrManager::GetInstance().Init();
+		return true;
 	}
 	void IEngine::Shutdown()
 	{
+		ITools::IPtrManager::GetInstance().Terminate();
 		INVENT::EngineAllocator::Clear();
 		IEngineTools::Instance().Clear();
 	}
