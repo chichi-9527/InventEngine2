@@ -61,7 +61,7 @@ endif()
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
 set(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/Lua")
 set(ISPC_TEXCOMPRESS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/ISPC_Texcomp")
-set(ONE_HEANER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/OneHeader")
+set(ONE_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/OneHeader")
 set(BULLET3_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/bullet3/src")
 set(YAML_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yaml-cpp")
 set(YOGA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/Other/yoga")
@@ -73,7 +73,7 @@ target_include_directories(Engine
     PRIVATE ${GLOBAL_VULKAN_SDK_INC} # vulkan sdk 头文件目录(slang and vulkan headers)
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
     PRIVATE ${ISPC_TEXCOMPRESS_DIR}/include # ispc texcomp 头文件目录
-    PRIVATE ${ONE_HEANER_DIR} # one-header 头文件目录
+    PRIVATE ${ONE_HEADER_DIR} # one-header 头文件目录
     PRIVATE ${BULLET3_SRC_DIR} # bullet3 源文件目录
     PRIVATE ${YAML_CPP_DIR}/include # yaml-cpp 头文件目录
     PRIVATE ${YOGA_DIR} # yoga 头文件目录
