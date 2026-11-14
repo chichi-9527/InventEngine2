@@ -41,6 +41,7 @@ endforeach()
 
 set(SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK")
 set(LUA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/SDK/Lua")
+set(ONE_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty/OneHeader")
 set(ENGINE_EDITOR_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Engine/EditorInclude")
 
 target_include_directories(EngineEditor
@@ -48,6 +49,7 @@ target_include_directories(EngineEditor
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Public
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/Private
     PRIVATE ${LUA_DIR}/include # lua 头文件目录
+    PRIVATE ${ONE_HEADER_DIR} # one-header 头文件目录
     PRIVATE ${GLOBAL_VULKAN_SDK_INC} # vulkan sdk 头文件目录(slang and vulkan headers)
     PRIVATE ${ENGINE_EDITOR_INCLUDE_DIR} # engine editor 头文件目录
 )
