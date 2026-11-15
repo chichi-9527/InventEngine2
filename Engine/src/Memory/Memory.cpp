@@ -93,6 +93,8 @@ namespace INVENT
 
 	void EngineAllocator::_deallocate_task(void* ptr)
 	{
+		if (_manager == nullptr) return;
+
 		auto iter = _manager->find(reinterpret_cast<uint64_t>(ptr));
 		if (iter != _manager->end())
 		{
