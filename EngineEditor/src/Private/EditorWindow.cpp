@@ -1,6 +1,7 @@
 ﻿#include "EditorWindow.h"
 
 #include "EditorConfig.h"
+#include "ImguiWindows.h"
 
 #include <ILog.h>
 #include <IGameModule.h>
@@ -99,6 +100,8 @@ bool EditorWindow::Start()
     Editor::CapturedDrawDatas.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), nullptr);
     Editor::CachedImageViews.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), VK_NULL_HANDLE);
     Editor::ScenceTextureIDs.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), ImTextureID{ 0 });
+
+    AUIWindow::Test();
 
     //
     if (!GetGameProjects())
