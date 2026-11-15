@@ -2,6 +2,9 @@
 
 namespace INVENT
 {
+	IBaseObject::~IBaseObject() = default;
+	IBaseObject::IBaseObject() = default;
+
 	ObjectRegistry& ObjectRegistry::Instance()
 	{
 		static ObjectRegistry o;
