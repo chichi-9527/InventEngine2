@@ -436,6 +436,44 @@ namespace INVENT
 	using DMat = base_mat4x4<double>;
 	using DQuat = base_quat<double>;
 
+	// 
+
+	TEMPLATE_STRUCT_API base_vec2<float>;
+	TEMPLATE_STRUCT_API base_vec3<float>;
+	TEMPLATE_STRUCT_API base_vec4<float>;
+	TEMPLATE_STRUCT_API base_mat2x2<float>;
+	TEMPLATE_STRUCT_API base_mat2x2<float>;
+	TEMPLATE_STRUCT_API base_mat2x3<float>;
+	TEMPLATE_STRUCT_API base_mat2x4<float>;
+	TEMPLATE_STRUCT_API base_mat3x3<float>;
+	TEMPLATE_STRUCT_API base_mat3x2<float>;
+	TEMPLATE_STRUCT_API base_mat3x3<float>;
+	TEMPLATE_STRUCT_API base_mat3x4<float>;
+	TEMPLATE_STRUCT_API base_mat4x4<float>;
+	TEMPLATE_STRUCT_API base_mat4x2<float>;
+	TEMPLATE_STRUCT_API base_mat4x3<float>;
+	TEMPLATE_STRUCT_API base_mat4x4<float>;
+	TEMPLATE_STRUCT_API base_mat4x4<float>;
+	TEMPLATE_STRUCT_API base_quat<float>;
+	// 雙精度 (Double)
+	TEMPLATE_STRUCT_API base_vec2<double>;
+	TEMPLATE_STRUCT_API base_vec3<double>;
+	TEMPLATE_STRUCT_API base_vec4<double>;
+	TEMPLATE_STRUCT_API base_mat2x2<double>;
+	TEMPLATE_STRUCT_API base_mat2x2<double>;
+	TEMPLATE_STRUCT_API base_mat2x3<double>;
+	TEMPLATE_STRUCT_API base_mat2x4<double>;
+	TEMPLATE_STRUCT_API base_mat3x3<double>;
+	TEMPLATE_STRUCT_API base_mat3x2<double>;
+	TEMPLATE_STRUCT_API base_mat3x3<double>;
+	TEMPLATE_STRUCT_API base_mat3x4<double>;
+	TEMPLATE_STRUCT_API base_mat4x4<double>;
+	TEMPLATE_STRUCT_API base_mat4x2<double>;
+	TEMPLATE_STRUCT_API base_mat4x3<double>;
+	TEMPLATE_STRUCT_API base_mat4x4<double>;
+	TEMPLATE_STRUCT_API base_mat4x4<double>;
+	TEMPLATE_STRUCT_API base_quat<double>;
+
 	namespace Math
 	{
 		// =========================================================================
