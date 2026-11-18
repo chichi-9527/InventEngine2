@@ -27,5 +27,9 @@
 #define IEngine_OUT
 #define IEngine_IN
 
-
+#ifdef EXPORTING_ENGINE
+#define TEMPLATE_STRUCT_API template struct __declspec(dllexport)
+#else
+#define TEMPLATE_STRUCT_API extern template struct __declspec(dllimport)
+#endif
 
