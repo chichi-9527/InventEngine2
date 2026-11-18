@@ -11,6 +11,7 @@ namespace INVENT
 	static bool RegBuilth()
 	{
 		auto& ctx = GetEngineEnttMetaContext();
+		entt::meta_factory<void>{ctx}.type("void");
 		entt::meta_factory<float>{ctx}.type("float");
 		entt::meta_factory<double>{ctx}.type("double");
 		entt::meta_factory<std::int8_t>{ctx}.type("std_int8");
@@ -86,12 +87,7 @@ namespace INVENT
 		static entt::meta_ctx ctx;
 		return ctx;
 	}
-	void ClearEngineEnttMetaContext()
-	{
-		entt::meta_reset(GetEngineEnttMetaContext());
-		RegBuilth();
-		RegMath();
-	}
+
 }
 
 namespace
