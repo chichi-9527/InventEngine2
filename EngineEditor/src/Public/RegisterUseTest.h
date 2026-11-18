@@ -157,4 +157,57 @@ public:
     }
 };
 
+/*
+    test log 输出：
+
+[2026-11-18 16:21:16.6107876][DEBUG]:[AUIWindow] === 遍歷enum : EWeaponType ===
+[2026-11-18 16:21:16.6108478][DEBUG]:[AUIWindow] Sword = 0.
+[2026-11-18 16:21:16.6108599][DEBUG]:[AUIWindow] Bow = 2.
+[2026-11-18 16:21:16.6108684][DEBUG]:[AUIWindow] Staff = 3.
+[2026-11-18 16:21:16.6108767][DEBUG]:[AUIWindow] === 類型資訊 ===
+[2026-11-18 16:21:16.6108855][DEBUG]:[AUIWindow] 類型名稱 (name): IRegister.
+[2026-11-18 16:21:16.6108939][DEBUG]:[AUIWindow] 類型 ID (id): 1690279213.
+[2026-11-18 16:21:16.6109067][DEBUG]:[AUIWindow] 父類別 (Super): IBaseObject.
+[2026-11-18 16:21:16.6109309][DEBUG]:[AUIWindow] === 遍歷屬性 (Properties) ===
+[2026-11-18 16:21:16.6109444][DEBUG]:[AUIWindow] 屬性名: test | 類型: float.
+[2026-11-18 16:21:16.6109532][DEBUG]:[AUIWindow]  -> 擁有自訂 EPropertyFlags: 1.
+[2026-11-18 16:21:16.6109624][DEBUG]:[AUIWindow]  propType name: float.
+[2026-11-18 16:21:16.6109801][DEBUG]:[AUIWindow]  -> 當前值 (float): 42.5.
+[2026-11-18 16:21:16.6109900][DEBUG]:[AUIWindow]  -> 修改後 actor.test = 99.9.
+[2026-11-18 16:21:16.6109998][DEBUG]:[AUIWindow] 屬性名: position | 類型: DVec3.
+[2026-11-18 16:21:16.6110083][DEBUG]:[AUIWindow]  -> 擁有自訂 EPropertyFlags: 1.
+[2026-11-18 16:21:16.6110171][DEBUG]:[AUIWindow]  -> 展開結構體 DVec3 成員:
+[2026-11-18 16:21:16.6110360][DEBUG]:[AUIWindow]     .x = 10.
+[2026-11-18 16:21:16.6110524][DEBUG]:[AUIWindow]     .y = 20.
+[2026-11-18 16:21:16.6110609][DEBUG]:[AUIWindow]     .z = 30.
+[2026-11-18 16:21:16.6110747][DEBUG]:[AUIWindow]  -> 修改後 actor.position.x = 10.
+[2026-11-18 16:21:16.6110835][DEBUG]:[AUIWindow] === 遍歷函数 (Properties) ===
+[2026-11-18 16:21:16.6110921][DEBUG]:[AUIWindow] 函数名：TakeDamage, is const: false, is tatic: false.
+[2026-11-18 16:21:16.6111076][DEBUG]:[AUIWindow] 函数返回类型str count：4
+[2026-11-18 16:21:16.6111164][DEBUG]:[AUIWindow] 函数返回类型：void
+[2026-11-18 16:21:16.6111248][DEBUG]:[AUIWindow] 函数参数类型 0: float
+[2026-11-18 16:21:16.6111333][DEBUG]:[AUIWindow] 函数参数名 : amount
+[2026-11-18 16:21:16.6111416][DEBUG]:[AUIWindow] 函数名：Add, is const: false, is tatic: false.
+[2026-11-18 16:21:16.6111507][DEBUG]:[AUIWindow] 函数返回类型str count：3
+[2026-11-18 16:21:16.6111588][DEBUG]:[AUIWindow] 函数返回类型：std_int32
+[2026-11-18 16:21:16.6111670][DEBUG]:[AUIWindow] 函数参数类型 0: std_int32
+[2026-11-18 16:21:16.6111754][DEBUG]:[AUIWindow] 函数参数类型 1: std_int32
+[2026-11-18 16:21:16.6111833][DEBUG]:[AUIWindow] 函数参数名 : a,b
+[2026-11-18 16:21:16.6111915][DEBUG]:[AUIWindow] 函数名：Add, is const: false, is tatic: false.
+[2026-11-18 16:21:16.6111998][DEBUG]:[AUIWindow] 函数返回类型str count：5
+[2026-11-18 16:21:16.6112080][DEBUG]:[AUIWindow] 函数返回类型：float
+[2026-11-18 16:21:16.6112164][DEBUG]:[AUIWindow] 函数参数类型 0: float
+[2026-11-18 16:21:16.6112247][DEBUG]:[AUIWindow] 函数参数类型 1: float
+[2026-11-18 16:21:16.6112328][DEBUG]:[AUIWindow] 函数参数名 : a,b
+[2026-11-18 16:21:16.6112414][DEBUG]:[AUIWindow] 函数名：Test11, is const: true, is tatic: false.
+[2026-11-18 16:21:16.6112505][DEBUG]:[AUIWindow] 函数返回类型str count：4
+[2026-11-18 16:21:16.6112602][DEBUG]:[AUIWindow] 函数返回类型：void
+[2026-11-18 16:21:16.6112690][DEBUG]:[AUIWindow] 函数参数名 :
+[2026-11-18 16:21:16.6112780][DEBUG]:[AUIWindow] 函数名：StaticTestF, is const: false, is tatic: true.
+[2026-11-18 16:21:16.6112871][DEBUG]:[AUIWindow] 函数返回类型str count：4
+[2026-11-18 16:21:16.6112960][DEBUG]:[AUIWindow] 函数返回类型：void
+[2026-11-18 16:21:16.6113046][DEBUG]:[AUIWindow] 函数参数名 :
+
+*/
+
 #endif //1
