@@ -1,7 +1,7 @@
 ﻿#include "EditorWindow.h"
 
 #include "EditorConfig.h"
-#include "ImguiWindows.h"
+#include "RegisterUseTest.h"
 
 #include <ILog.h>
 #include <IGameModule.h>
@@ -101,7 +101,9 @@ bool EditorWindow::Start()
     Editor::CachedImageViews.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), VK_NULL_HANDLE);
     Editor::ScenceTextureIDs.resize(INVENT::IRenderThreadBase::Instance().MaxFrameInFlight(), ImTextureID{ 0 });
 
-    AUIWindow::Test();
+#if 0
+    RegisterUseTest::Test();
+#endif
 
     //
     if (!GetGameProjects())
@@ -462,7 +464,7 @@ void EditorWindow::_framebuffer_size_callback(int width, int height)
 
 void EditorWindow::_register_key_callback(int key, int scancode, int action, int mods)
 {
-
+    
 }
 
 void EditorWindow::_cursor_position_callback(double xpos, double ypos)

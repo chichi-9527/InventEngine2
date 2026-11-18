@@ -20,7 +20,6 @@
 namespace INVENT
 {
 	INVENT_API entt::meta_ctx& GetEngineEnttMetaContext();
-	INVENT_API void ClearEngineEnttMetaContext();
 
 	enum class EPropertyFlags : uint32_t
 	{
@@ -63,6 +62,69 @@ namespace INVENT
 	{
 		return (value & flag) != EFuncFlags::None;
 	}
+
+	template <typename... Args>
+	struct FuncResolver 
+	{
+		// 匹配非 const 成員函數
+		template <typename ClassType, typename RetType>
+		static constexpr auto get(RetType(ClassType::* ptr)(Args...))
+		{
+			return ptr;
+		}
+		// 匹配 const 成員函數
+		template <typename ClassType, typename RetType>
+		static constexpr auto get(RetType(ClassType::* ptr)(Args...) const)
+		{
+			return ptr;
+		}
+		// 匹配類別 static 成員函數（或自由函數）
+		template <typename RetType>
+		static constexpr auto get(RetType(*ptr)(Args...))
+		{
+			return ptr;
+		}
+	};
+
+	template <>
+	struct FuncResolver<void> {
+		template <typename PtrType>
+		static constexpr auto get(PtrType ptr)
+		{
+			return ptr;
+		}
+	};
+
+	struct FuncMetaInfo {
+		EFuncFlags flags;
+		std::string_view paramNames; // 儲存參數名稱
+	};
+
+	enum class EEnumFlags : uint32_t {
+		None = 0,
+		BlueprintType = 1 << 0,
+		Bitflags = 1 << 1, // 若為位元遮罩枚舉，生成 Lua 時可加上特殊標記
+	};
+
+	// 整個枚舉類型的元資料
+	struct EnumMetaInfo {
+		EEnumFlags flags;
+	};
+
+	template <typename T>
+	struct AutoMetaRegistrar {
+		template <typename RegFunc>
+		AutoMetaRegistrar(RegFunc&& func)
+		{
+			// DLL 載入時（靜態初始化階段）：執行註冊
+			func();
+		}
+		~AutoMetaRegistrar()
+		{
+			// DLL 卸載時（靜態變數銷毀階段）：精準從引擎 Context 中移除型別 T
+			entt::meta_reset<T>(GetEngineEnttMetaContext());
+		}
+	};
 
 	class IBaseObject;
 	using ObjectCreatorFunc = IUniquePtr<IBaseObject>(*)();
@@ -367,7 +429,7 @@ namespace INVENT
 #define INVENT_STRUCT(StructName) \
     using ThisClass = StructName; \
     static void _reg_MetaStruct() { \
-        entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()}.type(#StructName); \
+		static INVENT::AutoMetaRegistrar<ThisClass> _meta_class_guard{[](){entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()}.type(#StructName);}};\
     } \
     inline static int _autoReg_MetaStruct = (ThisClass::_reg_MetaStruct(), 0);
 
@@ -418,11 +480,13 @@ public: \
     } \
     \
 private: \
-    inline static INVENT::AutoRegister<CLASS_NAME> _autoRegister##CLASS_NAME{ #CLASS_NAME };\
+	static void _reg_autoRegister(){static INVENT::AutoRegister<CLASS_NAME> _autoRegister##CLASS_NAME{ #CLASS_NAME };}\
+    inline static int _auto_register = (ThisClass::_reg_autoRegister(), 0); \
 	\
 	static void _reg_MetaClass(){\
-		entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()}.type(#CLASS_NAME) \
-			.base<Super>(); \
+		static INVENT::AutoMetaRegistrar<ThisClass> _meta_class_guard{[](){\
+			entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()}.type(#CLASS_NAME) \
+				.base<Super>(); }};\
 	} \
 	inline static int _autoReg_MetaClass = (ThisClass::_reg_MetaClass(), 0); \
 
@@ -437,53 +501,62 @@ private: \
     inline static int _autoReg_##Name = (ThisClass::_reg_##Name(), 0);
 
 
-// —— 基礎工具宏（強制 MSVC 展開可變參數） ——
+// —— 基礎工具宏 ——
 #define INVENT_EXPAND(x) x
 #define INVENT_CAT_IMPL(a, b) a##b
 #define INVENT_CAT(a, b) INVENT_CAT_IMPL(a, b)
-// —— 1. 無簽名版本（無重載時使用：2 個參數） ——
-#define INVENT_FUNC_NO_SIG(ID, FuncName, Flags) \
+
+// —— 1. 無簽名版本（無重載時使用：固定 3 個參數：FuncName, Flags, ParamNames） ——
+#define INVENT_FUNC_NO_SIG(ID, FuncName, Flags, ParamNames) \
     static void INVENT_CAT(_reg_func_, ID)() { \
-        entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()} \
-            .func<&ThisClass::FuncName>(#FuncName) \
-            .custom<INVENT::EFuncFlags>(Flags); \
-    } \
-    inline static int INVENT_CAT(_autoReg_func_, ID) = (ThisClass::INVENT_CAT(_reg_func_, ID)(), 0);
-// —— 2. 有簽名版本（重載時使用：3 個及以上參數，格式為 Ret, Args...） ——
-#define INVENT_FUNC_WITH_SIG(ID, FuncName, Flags, RetType, ...) \
-    static void INVENT_CAT(_reg_func_, ID)() { \
-        constexpr auto ptr = static_cast<RetType (ThisClass::*)(__VA_ARGS__)>(&ThisClass::FuncName); \
+        constexpr auto ptr = INVENT::FuncResolver<void>::get(&ThisClass::FuncName); \
         entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()} \
             .func<ptr>(#FuncName) \
-            .custom<INVENT::EFuncFlags>(Flags); \
+            .custom<INVENT::FuncMetaInfo>(INVENT::FuncMetaInfo{Flags, ParamNames}); \
     } \
     inline static int INVENT_CAT(_autoReg_func_, ID) = (ThisClass::INVENT_CAT(_reg_func_, ID)(), 0);
-// —— 3. 參數個數計數器（最多支援 10 個函數參數，夠用絕大多數情況） ——
+
+// —— 2. 有簽名版本（重載或無參重載時使用：4 個及以上參數：FuncName, Flags, ParamNames, Args...） ——
+#define INVENT_FUNC_WITH_SIG(ID, FuncName, Flags, ParamNames, ...) \
+    static void INVENT_CAT(_reg_func_, ID)() { \
+        constexpr auto ptr = INVENT::FuncResolver<__VA_ARGS__>::get(&ThisClass::FuncName); \
+        entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()} \
+            .func<ptr>(#FuncName) \
+            .custom<INVENT::FuncMetaInfo>(INVENT::FuncMetaInfo{Flags, ParamNames}); \
+    } \
+    inline static int INVENT_CAT(_autoReg_func_, ID) = (ThisClass::INVENT_CAT(_reg_func_, ID)(), 0);
+
+// —— 3. 參數個數計數器（前 3 個固定為 FuncName, Flags, ParamNames，第 4 個起為 Args...） ——
 #define INVENT_FUNC_SELECT_IMPL(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, NAME, ...) NAME
 #define INVENT_FUNC_SELECT(...) \
     INVENT_EXPAND(INVENT_FUNC_SELECT_IMPL(__VA_ARGS__, \
         INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, \
         INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, \
-        INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, INVENT_FUNC_NO_SIG, ERROR))
-// CONST
-#define INVENT_FUNC_CONST_IMPL(ID, FuncName, Flags, RetType, ...) \
-    static void INVENT_CAT(_reg_func_, ID)() { \
-        constexpr auto ptr = static_cast<RetType (ThisClass::*)(__VA_ARGS__) const>(&ThisClass::FuncName); \
-        entt::meta_factory<ThisClass>{INVENT::GetEngineEnttMetaContext()} \
-            .func<ptr>(#FuncName) \
-            .custom<INVENT::EFuncFlags>(Flags); \
-    } \
-    inline static int INVENT_CAT(_autoReg_func_, ID) = (ThisClass::INVENT_CAT(_reg_func_, ID)(), 0);
+        INVENT_FUNC_WITH_SIG, INVENT_FUNC_WITH_SIG, INVENT_FUNC_NO_SIG, ERROR, ERROR))
 
-// 調用方式：
-//   無簽名版本：INVENT_FUNC(MyFunc, EFuncFlags::BlueprintCallable)
-//   無參數：INVENT_FUNC(GetVal, Flags, int)       -> 展開為 int(ThisClass::*)()
-//   多參數：INVENT_FUNC(Add, Flags, int, int, int) -> 展開為 int(ThisClass::*)(int, int)
+// —— 統一入口 ——
 #define INVENT_FUNC(...) \
     INVENT_EXPAND(INVENT_FUNC_SELECT(__VA_ARGS__)(INVENT_CAT(Func_, __COUNTER__), __VA_ARGS__))
-// 調用方式： 同 INVENT_FUNC, 但必须传入返回类型
-#define INVENT_FUNC_CONST(...) \
-    INVENT_EXPAND(INVENT_FUNC_CONST_IMPL(INVENT_CAT(Func_, __COUNTER__), __VA_ARGS__))
 
 
 
+// —— 開始註冊枚舉 ——
+#define INVENT_ENUM_BEGIN(EnumType, Flags) \
+    namespace { \
+        static void INVENT_CAT(_reg_enum_, EnumType)() { \
+            entt::meta_factory<EnumType>{INVENT::GetEngineEnttMetaContext()} \
+                .type(#EnumType) \
+                .custom<INVENT::EnumMetaInfo>(INVENT::EnumMetaInfo{Flags})
+
+// —— 註冊單個枚舉值 ——
+#define INVENT_ENUM_VALUE(EnumType, ValueName) \
+                .data<EnumType::ValueName>(#ValueName)
+
+// —— 結束註冊枚舉（觸發靜態初始化自動執行） ——
+#define INVENT_ENUM_END(EnumType) \
+            ; \
+        } \
+          inline static INVENT::AutoMetaRegistrar<EnumType> INVENT_CAT(_autoReg_enum_, EnumType){ \
+            &INVENT_CAT(_reg_enum_, EnumType) \
+        }; \
+    }
