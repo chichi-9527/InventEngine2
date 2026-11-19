@@ -640,10 +640,6 @@ namespace INVENT
 			// 本帧命令缓冲开头需要补 acquire barrier
 			_pending_acquires.push_back(c);
 
-			// 通知材质: baseMip -> 材质 BDA (先更新描述符再回调, 保证新值对应新 view)
-			if (_resident_changed_callback)
-				_resident_changed_callback(Texture2DHandle{ c.slot },
-					c.new_base, c.total_mips - c.new_base, c.total_mips);
 		}
 	}
 
@@ -677,9 +673,6 @@ namespace INVENT
 		IVulkanBase::Base().UpdateBindlessTextureSlot(slot,
 			_default_textures[_get_default_texture_index(type)].ImageView);
 
-		if (_resident_changed_callback)
-			_resident_changed_callback(Texture2DHandle{ slot },
-				UINT32_MAX, 0, s.TotalMips.load(std::memory_order_relaxed));
 	}
 
 	void IVulkanTexture2DManagement::_begin_pending_windows(const std::vector<std::uint32_t>& slots)

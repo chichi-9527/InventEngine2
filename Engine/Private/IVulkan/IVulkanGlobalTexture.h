@@ -143,14 +143,6 @@ namespace INVENT
 			std::uint32_t ResidentBase{ UINT32_MAX };			// 当前窗口基点; UINT32_MAX = 未驻留
 		};
 
-		// 材质驻留变化通知 (主线程调用):
-		//   new_base_mip    : 窗口基点(虚拟 mip 层号); UINT32_MAX = 已驱逐, 回到默认贴图
-		//   image_mip_count : 窗口 image 自身层数 (显式 LOD 上限)
-		//   total_mips      : 虚拟总层数
-		// 材质在回调中把 base_mip 写入自身 BDA 数据并标脏
-		using TextureResidentChangedCallback = std::function<void(Texture2DHandle,
-			std::uint32_t /*new_base_mip*/, std::uint32_t /*image_mip_count*/, std::uint32_t /*total_mips*/)>;
-
 	private:
 
 		enum class LoadDDSType : uint32_t
@@ -271,11 +263,6 @@ namespace INVENT
 
 		///////////////////
 		// ===== 纹理流式加载 =====
-
-		void SetTextureResidentChangedCallback(TextureResidentChangedCallback callback)
-		{
-			_resident_changed_callback = std::move(callback);
-		}
 
 		/// <summary> 固定纹理不被驱逐 (天空盒/UI 等不参与实例裁剪 CS 的纹理必须 pin) </summary>
 		void SetTexturePinned(const Texture2DHandle& handle, bool pinned)
@@ -429,8 +416,6 @@ namespace INVENT
 		std::array<std::vector<PendingDestroy>, IVulkan::MAX_FRAMES_IN_FLIGHT + 1> _frame_destroy_ring;
 		std::uint32_t _destroy_cursor = 0;
 		std::uint64_t _frame_counter = 0;
-
-		TextureResidentChangedCallback _resident_changed_callback;
 
 		std::uint32_t _max_used_slot{ 0 };
 
