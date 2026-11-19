@@ -14,6 +14,16 @@ namespace INVENT
 	template<typename T>
 	class IMemPoolAllocatorOnlyFixedBlock;
 
+	enum IRendererPipelineType : std::uint32_t
+	{
+		PipelineLoading = 0,
+		PipelineComputeGeneral,
+		PipelineComputeReturnObjectID,
+		PipelineMainOpaque,
+
+		PipelineCount
+	};
+
 	/*
 	* 渲染流程 (渲染线程独占, 每帧三段式):
 	*
@@ -21,8 +31,6 @@ namespace INVENT
 	*   RenderFrame(f) : 录制 acquire屏障 -> 反馈CS -> quad 绘制 -> present 转换
 	*   EndRender()    : 结束录制 -> 提交 -> present
 	*
-	* 测试阶段: 硬编码 quad + 单实例(纹理 slot) + 反馈CS替身
-	* 之后: RenderFrame 里换成 裁剪CS + GPU驱动间接绘制, 帧结构不变
 	*/
 	class IVulkanRenderer
 	{
@@ -66,6 +74,8 @@ namespace INVENT
 		static void RenderFrame(std::uint32_t frameindex);
 		static void EndRender();
 
+		static void UpdatePipeline(IRendererPipelineType type, VkPipeline pipeline);
+
 		static void SetMainRTExtent(std::uint32_t width, std::uint32_t height);
 		static void SetImguiNewFrameFunc(IImgui::ImguiNewFrameFunc func) { _imgui_new_frame_func = func; _use_imgui = true; }
 		static void SetImguiEndFrameAndFetchDataFunc(IImgui::ImguiEndFrameAndFetchDataFunc func) { _imgui_end_frame_and_fetch_func = func; }
@@ -91,6 +101,8 @@ namespace INVENT
 		static void _read_and_callback_mouseback(std::uint32_t frame_index);
 		static bool _recreate_swapchain();
 		static bool _recreate_mainRTs();
+		static bool _is_pipeline_ok(IRendererPipelineType pipeline, const IRendererPipelineType* pre, std::uint32_t pre_count);
+		static void _update_pipelines();
 		// 离屏渲染imageview延迟销毁
 		static bool _flush_destroy_queue();
 		static void _clear();
@@ -102,6 +114,10 @@ namespace INVENT
 		inline static VkPipeline _object_id_compute_pipeline = VK_NULL_HANDLE;
 		// main (测试 quad)
 		inline static VkPipeline _main_opaque_pipeline = VK_NULL_HANDLE;
+
+		inline static std::array<VkPipeline, static_cast<size_t>(IRendererPipelineType::PipelineCount)> _pipelines{};
+		inline static std::vector<std::pair<IRendererPipelineType, VkPipeline>> _pipelines_updates;
+		inline static std::mutex _pipelines_updates_mutex;
 
 		inline static std::vector<VkFence> _frame_fences;
 		inline static std::vector<VkSemaphore> _acquire_semaphores;	// 每帧槽

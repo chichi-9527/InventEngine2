@@ -78,7 +78,8 @@ namespace INVENT
 		VkImage image = VK_NULL_HANDLE;
 		VkImageView imageView = VK_NULL_HANDLE;
 	};
-	static std::array<std::vector<DestroyRT>, IVulkan::MAX_FRAMES_IN_FLIGHT + 1> FrameDestroyRing;
+	static std::array<std::vector<DestroyRT>, IVulkan::MAX_FRAMES_IN_FLIGHT + 1> FrameRTDestroyRing;
+	static std::array<std::vector<VkPipeline>, IVulkan::MAX_FRAMES_IN_FLIGHT + 1> FramePipelineDestroyRing;
 	static std::uint32_t _destroy_cursor = 0;
 	struct MouseWorldPositionObjGetBackPackage {
 		MouseWorldPositionObjGetBackFunc func = nullptr;
@@ -95,12 +96,6 @@ namespace INVENT
 			INVENT_LOG_FATAL("[IVulkanRenderer] VulkanBase 未初始化!");
 			return false;
 		}
-
-		IVulkanTexture2DManagement::Instance().SetTextureResidentChangedCallback(
-			[](IVulkanTexture2DManagement::Texture2DHandle h,
-				std::uint32_t baseMip, std::uint32_t mipCount, std::uint32_t totalMips) {
-					// 材质 baseMip 更新接入点 (测试阶段空实现)
-			});
 
 		// 管理器 (顺序: 纹理 -> 材质 -> 顶点索引 -> 实例)
 		if (!IVulkanTexture2DManagement::Instance().Init() ||
@@ -418,7 +413,7 @@ namespace INVENT
 		{
 			if (rt.imageView != VK_NULL_HANDLE || rt.image != VK_NULL_HANDLE)
 			{
-				FrameDestroyRing[_destroy_cursor].push_back({ rt.image, rt.imageView });
+				FrameRTDestroyRing[_destroy_cursor].push_back({ rt.image, rt.imageView });
 			}
 
 			if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
@@ -447,7 +442,7 @@ namespace INVENT
 		}
 		if (_main_depth_RT.sRT.imageView != VK_NULL_HANDLE || _main_depth_RT.sRT.image != VK_NULL_HANDLE)
 		{
-			FrameDestroyRing[_destroy_cursor].push_back({ _main_depth_RT.sRT.image, _main_depth_RT.sRT.imageView });
+			FrameRTDestroyRing[_destroy_cursor].push_back({ _main_depth_RT.sRT.image, _main_depth_RT.sRT.imageView });
 		}
 
 		VkImageUsageFlags depthUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -487,7 +482,7 @@ namespace INVENT
 		{
 			if (rt.sRT.imageView != VK_NULL_HANDLE || rt.sRT.image != VK_NULL_HANDLE)
 			{
-				FrameDestroyRing[_destroy_cursor].push_back({ rt.sRT.image, rt.sRT.imageView });
+				FrameRTDestroyRing[_destroy_cursor].push_back({ rt.sRT.image, rt.sRT.imageView });
 			}
 			VkImageUsageFlags idUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 			if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
@@ -523,10 +518,44 @@ namespace INVENT
 		return true;
 	}
 
+	bool IVulkanRenderer::_is_pipeline_ok(IRendererPipelineType pipeline, const IRendererPipelineType* pre, std::uint32_t pre_count)
+	{
+		if (_pipelines[pipeline] == VK_NULL_HANDLE)
+			return false;
+		if (pre == nullptr || pre_count == 0) return true;
+
+		for (std::uint32_t i = 0; i < pre_count; ++i)
+		{
+			if (_pipelines[pre[i]] == VK_NULL_HANDLE) return false;
+		}
+		return true;
+	}
+
+	void IVulkanRenderer::_update_pipelines()
+	{
+		std::vector<std::pair<IRendererPipelineType, VkPipeline>> pending;
+		{
+			std::lock_guard<std::mutex> lock(_pipelines_updates_mutex);
+			if (_pipelines_updates.empty()) return;
+			pending.swap(_pipelines_updates);
+		}
+		
+		for (auto& [type, pipeline] : pending)
+		{
+			auto& currentP = _pipelines[type];
+			if (currentP != pipeline)
+			{
+				if (currentP != VK_NULL_HANDLE)
+					FramePipelineDestroyRing[_destroy_cursor].push_back(currentP);
+				currentP = pipeline;
+			}
+		}
+	}
+
 	bool IVulkanRenderer::_flush_destroy_queue()
 	{
 		_destroy_cursor = (_destroy_cursor + 1) % (IVulkan::MAX_FRAMES_IN_FLIGHT + 1);
-		auto& items = FrameDestroyRing[_destroy_cursor];	// 恰好 N+1 帧前入队的资源
+		auto& items = FrameRTDestroyRing[_destroy_cursor];	// 恰好 N+1 帧前入队的资源
 		for (auto& it : items)
 		{
 			if (it.imageView != VK_NULL_HANDLE)
@@ -538,7 +567,15 @@ namespace INVENT
 			}
 		}
 		items.clear();
-		return false;
+
+		auto device = IVulkanBase::Base().GetDevice();
+		auto& pipelines = FramePipelineDestroyRing[_destroy_cursor];
+		for (auto& p : pipelines)
+		{
+			if (p != VK_NULL_HANDLE) vkDestroyPipeline(device, p, nullptr);
+		}
+		pipelines.clear();
+		return true;
 	}
 
 	bool IVulkanRenderer::_init_frames()
@@ -830,6 +867,8 @@ namespace INVENT
 
 		// 1) 帧同步
 		vkWaitForFences(device, 1, &_frame_fences[frameindex], VK_TRUE, UINT64_MAX);
+
+		_update_pipelines();
 
 		// 回读
 		_read_and_callback_mouseback(frameindex);
@@ -1179,6 +1218,14 @@ namespace INVENT
 
 	}
 
+	void IVulkanRenderer::UpdatePipeline(IRendererPipelineType type, VkPipeline pipeline)
+	{
+		assert(static_cast<std::size_t>(type) < _pipelines.size());
+
+		std::lock_guard<std::mutex> lock(_pipelines_updates_mutex);
+		_pipelines_updates.emplace_back(type, pipeline);
+	}
+
 	void IVulkanRenderer::SetMainRTExtent(std::uint32_t width, std::uint32_t height)
 	{
 		if (_mainRT_extent.width == width && _mainRT_extent.height == height) return;
@@ -1268,7 +1315,7 @@ namespace INVENT
 		}
 		_object_id_RTs.clear();
 		_image_barrier_cache_map->clear();
-		for (auto& d : FrameDestroyRing)
+		for (auto& d : FrameRTDestroyRing)
 		{
 			for (auto& rt : d)
 			{
@@ -1279,6 +1326,17 @@ namespace INVENT
 				if (rt.image != VK_NULL_HANDLE)
 				{
 					base.UseVmaDestroyImage(rt.image);
+				}
+			}
+			d.clear();
+		}
+		for (auto& d : FramePipelineDestroyRing)
+		{
+			for (auto& p : d)
+			{
+				if (p != VK_NULL_HANDLE)
+				{
+					vkDestroyPipeline(device, p, nullptr);
 				}
 			}
 			d.clear();
