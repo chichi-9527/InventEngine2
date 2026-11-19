@@ -46,6 +46,10 @@ if (MSVC)
     target_compile_options(${PROJECT_NAME} PUBLIC "/utf-8")
 endif()
 
+target_compile_definitions(${PROJECT_NAME} 
+    PRIVATE EXPORTING_GAME
+)
+
 # 源文件分组
 foreach(FILE ${GAME_ALL_FILES})
     get_filename_component(FILE_DIR "${FILE}" DIRECTORY)
