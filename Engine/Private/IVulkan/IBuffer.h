@@ -50,6 +50,7 @@ namespace INVENT
 	class IBuffer : public IBaseBuffer
 	{
 		friend class IVulkanGlobalVerticesIndices;
+		friend class IVulkanUIMesh;
 
 		using pointType = T;
 
@@ -86,7 +87,7 @@ namespace INVENT
 
 	private:
 		
-		inline static std::mutex _s_mutex;
+		std::mutex _s_mutex;
 
 		VkBuffer _buffer = VK_NULL_HANDLE;
 		VkDeviceAddress _device_address{ 0 };
