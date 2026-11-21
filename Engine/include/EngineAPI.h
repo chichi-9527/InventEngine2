@@ -8,8 +8,10 @@
 #ifdef _WIN32
     #ifdef EXPORTING_ENGINE
         #define INVENT_API __declspec(dllexport)
+        #define TEMPLATE_STRUCT_API template struct __declspec(dllexport)
     #else
         #define INVENT_API __declspec(dllimport)
+        #define TEMPLATE_STRUCT_API extern template struct __declspec(dllimport)
     #endif // EXPORTING_ENGINE
     //old: #define INVENT_DLL __stdcall, always x64
     #define INVENT_DLL
@@ -20,6 +22,7 @@
         #define INVENT_API
     #endif // __GNUC__
     #define INVENT_DLL
+    #define TEMPLATE_STRUCT_API
 #endif // _WIN32
 
 #endif // INVENT_STATIC
@@ -43,10 +46,4 @@
 
 #define IEngine_OUT
 #define IEngine_IN
-
-#ifdef EXPORTING_ENGINE
-#define TEMPLATE_STRUCT_API template struct __declspec(dllexport)
-#else
-#define TEMPLATE_STRUCT_API extern template struct __declspec(dllimport)
-#endif
 
