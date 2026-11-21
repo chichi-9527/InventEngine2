@@ -262,7 +262,7 @@ namespace INVENT
 		QueueFamilyIndices _queue_family_indices{};
 		VkExtent2D _swap_chain_extent{};
 
-		VkShaderStageFlags _push_constant_stage_flags{ VK_SHADER_STAGE_COMPUTE_BIT };
+		VkShaderStageFlags _push_constant_stage_flags{ VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT };
 		VkFormat _swap_chain_image_format{ VK_FORMAT_UNDEFINED };
 		VkImageUsageFlags _swap_chain_image_usages{ VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT };
 		VkFormat _depth_format{ VK_FORMAT_UNDEFINED };

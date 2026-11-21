@@ -749,7 +749,9 @@ namespace INVENT
 		};
 
 		VkPushConstantRange pushConstantRange{};
-		_push_constant_stage_flags = VK_SHADER_STAGE_COMPUTE_BIT;
+		// 计算着色器 (视锥裁剪/拾取) 与 后处理全屏 pass (片元着色器读取源纹理 bindless 槽位) 共用同一套 push constants,
+		// 因此 push constant range 必须同时覆盖 compute / vertex / fragment 阶段
+		_push_constant_stage_flags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 		pushConstantRange.stageFlags = _push_constant_stage_flags;
 		pushConstantRange.offset = 0;
 		pushConstantRange.size = sizeof(IVulkan::PushConstants);
