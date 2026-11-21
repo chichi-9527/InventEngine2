@@ -36,6 +36,7 @@ namespace IVulkan
 	constexpr std::uint32_t DEF_RESIDENT_INDEX_BUFFER_COUNT = 4u * 1024; // 默认常驻索引 buffer 顶点个数 4096(个)
 	constexpr std::uint32_t DEF_MATERIAL_COUNT_PER_BUFFER = 16384;		// 每个材质 buffer 槽位数 (16384 * 32B = 512KB)
 	constexpr VkDeviceSize DEF_MATERIAL_DIRTY_STAGING_BYTES = 256 * 1024;	// 每帧脏上传上限 (256KB = 8192 材质/帧, 溢出部分留到下帧)
+	constexpr std::uint32_t MAX_UI_QUAD_COUNT = 65536u;  // 单 ui 界面最大可生成矩形数量
 
 	// in shader 
 	constexpr std::uint32_t ComputeShaderThreadXCount = 64u; // 计算着色器 x 线程数量 64(个), 根据 shader 中具体数量

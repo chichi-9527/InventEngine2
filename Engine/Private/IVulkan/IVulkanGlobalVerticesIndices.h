@@ -9,6 +9,7 @@
 #include <memory_resource>
 #include <functional>
 #include <memory>
+#include <atomic>
 
 namespace INVENT
 {
@@ -282,4 +283,70 @@ namespace INVENT
 			}
 		}
 	}
+
+
+	// ui vertex
+
+	struct alignas(16) IUIVertex
+	{
+		// 12B
+		glm::vec3 position{ 0.0f };
+		// 4B
+		std::uint32_t textureID{ 0u };
+
+		// 8B
+		glm::vec2 uv;
+		// 4B
+		glm::u8vec4 color{ 255u };
+		// 4B [0] ==1: diffuse texture ,==2: MSDF [1] pxRange
+		glm::u16vec2 dataPack{ 0 };
+
+		// 16B
+		glm::vec4 clipRect{ -1e6f, -1e6f, 1e6f, 1e6f };
+	};
+	static_assert(sizeof(IUIVertex) == 48);
+	static_assert(offsetof(IUIVertex, textureID) == 12);
+	static_assert(offsetof(IUIVertex, uv) == 16);
+	static_assert(offsetof(IUIVertex, color) == 24);
+	static_assert(offsetof(IUIVertex, dataPack) == 28);
+	static_assert(offsetof(IUIVertex, clipRect) == 32);
+	static_assert(alignof(IUIVertex) == 16);
+
+	class IVulkanUIMesh 
+	{
+	public:
+		// after IVulkanGlobalVerticesIndices::Init
+		static bool InitIndices();
+		static void DestroyIndices();
+		static VkDeviceAddress GetIndexAddress();
+	private:
+		inline static IBuffer<std::uint32_t>* _index_buffer = nullptr;
+		inline static IBaseBuffer::Bhandle _buffer_handle{ 0 };
+	public:
+		IVulkanUIMesh() = default;
+		IVulkanUIMesh(const IVulkanUIMesh&) = delete;
+		IVulkanUIMesh& operator=(const IVulkanUIMesh&) = delete;
+		IVulkanUIMesh(IVulkanUIMesh&& other) noexcept = delete;
+		IVulkanUIMesh& operator=(IVulkanUIMesh&& other) noexcept = delete;
+
+		~IVulkanUIMesh();
+
+		explicit IVulkanUIMesh(const IUIVertex* vertexes, std::uint32_t quad_count);
+		bool UpdateVertexes(const IUIVertex* vertexes, std::uint32_t quad_cout, IEngine_OUT std::function<void()>& out_deleter);
+
+		VkDeviceAddress GetVertexAddress() const;
+
+		std::uint32_t GetCurrQuadCount() const { return _current_quad_count; }
+		bool IsValid() const { return _is_valid; }
+	private:
+		std::array<IBuffer<IUIVertex>*, 2> _vertex_buffers{ nullptr };
+		std::atomic_uint32_t _current_index{ 0 };
+		std::array<IBaseBuffer::Bhandle, 2> _handles{ IBaseBuffer::INVALID_VHANDLE };
+
+		std::uint32_t _current_quad_count{ 0u };
+		std::array<std::uint32_t, 2> _max_quad_counts{ 0u };
+
+		bool _is_valid{ false };
+	};
+
 }

@@ -15,6 +15,7 @@ namespace INVENT
 	T* NewUseEngineAllocator(Args&& ...args)
 	{
 		void* ptr = EngineAllocator::Allocate(sizeof(T));
+		if (ptr == nullptr) return nullptr;
 		return ::new(ptr) T(std::forward<Args>(args)...);
 	}
 	template<typename T>
@@ -39,6 +40,8 @@ namespace INVENT
 		if (!IBaseBuffer::InitUploadContext()) return false;
 		_default_vertex_buffer = NewUseEngineAllocator<IBuffer<IVertex>>(IVulkan::DEF_RESIDENT_VERTEX_BUFFER_COUNT);
 		_default_index_buffer = NewUseEngineAllocator<IBuffer<std::uint16_t>>(IVulkan::DEF_RESIDENT_INDEX_BUFFER_COUNT);
+
+		if (_default_vertex_buffer == nullptr || _default_index_buffer == nullptr) return false;
 
 		auto memPool = IEngineTools::Instance().GetMemPoolPool();
 		if (memPool == nullptr) return false;
@@ -129,6 +132,7 @@ namespace INVENT
 			try
 			{
 				useVBuffer = NewUseEngineAllocator<IBuffer<IVertex>>(IVulkan::DEF_ONE_BUFFER_VERTEX_COUNT);
+				if (useVBuffer == nullptr) return {};
 			}
 			catch (const std::exception& e)
 			{
@@ -175,6 +179,7 @@ namespace INVENT
 				try
 				{
 					ibuffer32 = NewUseEngineAllocator<IBuffer<std::uint32_t>>(IVulkan::DEF_ONE_BUFFER_VERTEX_COUNT);
+					if (ibuffer32 == nullptr) return {};
 				}
 				catch (const std::exception& e)
 				{
@@ -211,6 +216,7 @@ namespace INVENT
 				try
 				{
 					ibuffer16 = NewUseEngineAllocator<IBuffer<std::uint16_t>>(IVulkan::DEF_ONE_BUFFER_VERTEX_COUNT);
+					if (ibuffer16 == nullptr) return {};
 				}
 				catch (const std::exception& e)
 				{
@@ -234,6 +240,7 @@ namespace INVENT
 		}
 		const std::uint32_t idx = _acquire_record_slot();
 		auto rec = NewUseEngineAllocator<VertexIndexDataRecord>(name, &_string_memory_pool);
+		if (rec == nullptr) return {};
 		rec->vertexBuffer = useVBuffer;
 		rec->vertexHandle = vhandle;
 		rec->index16Buffer = ibuffer16;
@@ -488,5 +495,130 @@ namespace INVENT
 		return static_cast<std::uint32_t>(_records.size() - 1);
 	}
 
+
+	bool IVulkanUIMesh::InitIndices()
+	{
+		const std::size_t indexCount = std::size_t(IVulkan::MAX_UI_QUAD_COUNT) * 6u;
+		std::vector<std::uint32_t> indices(indexCount);
+
+		for (std::uint32_t q = 0; q < IVulkan::MAX_UI_QUAD_COUNT; ++q)
+		{
+			const std::uint32_t base = q * 4u;
+			std::uint32_t* dst = indices.data() + std::size_t(q) * 6u;
+			dst[0] = base + 0; dst[1] = base + 1; dst[2] = base + 2;
+			dst[3] = base + 2; dst[4] = base + 3; dst[5] = base + 0;
+		}
+
+		_index_buffer = NewUseEngineAllocator<IBuffer<std::uint32_t>>(IVulkan::MAX_UI_QUAD_COUNT * 6);
+		if (_index_buffer == nullptr) return false;
+		_buffer_handle = _index_buffer->AddDatas(indices.data(), IVulkan::MAX_UI_QUAD_COUNT * 6);
+
+		if (_buffer_handle == IBaseBuffer::INVALID_VHANDLE)
+		{
+			INVENT_LOG_ERROR("[IVulkanUIMesh] ui mesh index buffer add error!");
+			return false;
+		}
+
+		return true;
+	}
+
+	void IVulkanUIMesh::DestroyIndices()
+	{
+		DeleteUseEngineAllocator(_index_buffer);
+		_buffer_handle = IBaseBuffer::INVALID_VHANDLE;
+	}
+
+	VkDeviceAddress IVulkanUIMesh::GetIndexAddress()
+	{
+		if (_index_buffer != nullptr && _buffer_handle != IBaseBuffer::INVALID_VHANDLE)
+			return _index_buffer->_get_datas()[_buffer_handle].BaseAddress;
+		return VkDeviceAddress{ 0 };
+	}
+
+	IVulkanUIMesh::~IVulkanUIMesh()
+	{
+		for (auto& _vertex_buffer : _vertex_buffers)
+		{
+			if (_vertex_buffer != nullptr)
+			{
+				DeleteUseEngineAllocator(_vertex_buffer);
+			}
+		}
+		_current_quad_count = 0;
+		_max_quad_counts = { 0 };
+	}
+
+	IVulkanUIMesh::IVulkanUIMesh(const IUIVertex* vertexes, std::uint32_t quad_count)
+	{
+		if (quad_count > IVulkan::MAX_UI_QUAD_COUNT) return;
+
+		_current_quad_count = quad_count;
+		_max_quad_counts[0] = std::min(static_cast<std::uint32_t>(quad_count * 1.5f), IVulkan::MAX_UI_QUAD_COUNT);
+		_vertex_buffers[0] = NewUseEngineAllocator<IBuffer<IUIVertex>>(_max_quad_counts[0] * 4);
+		if (_vertex_buffers[0] == nullptr) return;
+
+		if (_handles[0] = _vertex_buffers[0]->AddDatas(vertexes, _current_quad_count * 4);
+			_handles[0] == IBaseBuffer::INVALID_VHANDLE)
+			return;
+
+		_is_valid = true;
+	}
+
+	bool IVulkanUIMesh::UpdateVertexes(const IUIVertex* vertexes, std::uint32_t quad_count, std::function<void()>& out_deleter)
+	{
+		if (quad_count > IVulkan::MAX_UI_QUAD_COUNT) return false;
+		if (vertexes == nullptr && quad_count == 0) return false;
+
+		auto curr = _current_index.load(std::memory_order_relaxed);
+		auto next = 1u - curr;
+
+		IBuffer<IUIVertex>* old = _vertex_buffers[next];
+		IBuffer<IUIVertex>* fresh = old;
+
+		if (fresh == nullptr || quad_count > _max_quad_counts[next])
+		{
+			const std::uint32_t newMax = std::min<std::uint32_t>(
+				static_cast<std::uint32_t>(quad_count * 1.5f), IVulkan::MAX_UI_QUAD_COUNT);
+			fresh = NewUseEngineAllocator<IBuffer<IUIVertex>>(newMax * 4u);
+			if (fresh == nullptr)
+			{
+				return false;
+			}
+			_max_quad_counts[next] = newMax;
+
+		}
+		else
+		{
+			fresh->Reset();
+		}
+
+		const auto handle = fresh->AddDatas(vertexes, quad_count * 4u);
+		if (handle == IBaseBuffer::INVALID_VHANDLE)
+		{
+			if (fresh != old) DeleteUseEngineAllocator(fresh);
+			return false;
+		}
+
+		_vertex_buffers[next] = fresh;      // 先发布，再 release 存储
+		_handles[next] = handle;
+		_current_quad_count = quad_count;
+		_current_index.store(next, std::memory_order_release);
+
+		if (fresh != old && old != nullptr)
+			out_deleter = [old]() { 
+			old->~IBuffer<IUIVertex>();
+			EngineAllocator::Deallocate(old);
+			};
+
+		return true;
+	}
+
+	VkDeviceAddress IVulkanUIMesh::GetVertexAddress() const
+	{
+		auto curr = _current_index.load(std::memory_order_acquire);
+		if (auto buffer = _vertex_buffers[curr]; buffer != nullptr && _handles[curr] != IBaseBuffer::INVALID_VHANDLE)
+			return buffer->_get_datas()[_handles[curr]].BaseAddress;
+		return VkDeviceAddress{ 0 };
+	}
 
 }
