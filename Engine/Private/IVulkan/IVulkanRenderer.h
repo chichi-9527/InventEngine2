@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ImguiConfig.h"
 #include "FuncDef.h"
@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstdint>
 #include <chrono>
+#include <mutex>
 
 namespace INVENT
 {
@@ -20,6 +21,7 @@ namespace INVENT
 		PipelineComputeGeneral,
 		PipelineComputeReturnObjectID,
 		PipelineMainOpaque,
+		PipelinePostProcessing,
 
 		PipelineCount
 	};
@@ -28,8 +30,15 @@ namespace INVENT
 	* 渲染流程 (渲染线程独占, 每帧三段式):
 	*
 	*   BeginRender(f) : 等 frameFence[f] -> 流式三连 -> acquire -> BindMipFeedback -> 开始录制
-	*   RenderFrame(f) : 录制 acquire屏障 -> 反馈CS -> quad 绘制 -> present 转换
+	*   RenderFrame(f) : 录制 acquire屏障 -> 反馈CS -> 主场景渲染 -> 后处理 -> imgui -> present 转换
 	*   EndRender()    : 结束录制 -> 提交 -> present
+	*
+	* 主场景渲染目标:
+	*   _use_imgui || _is_post_processing_renderer_ready : _mainRTs[f] (离屏)
+	*   否则                                             : 交换链图像 (直接上屏, 省一次全屏采样)
+	* 后处理输出目标:
+	*   _use_imgui      : postProcessingRTs[f] (离屏, 供 imgui 采样显示)
+	*   !_use_imgui     : 交换链图像 (直接上屏)
 	*
 	*/
 	class IVulkanRenderer
@@ -108,16 +117,12 @@ namespace INVENT
 		static void _clear();
 
 	private:
-		// compute (反馈替身, 之后 = 视锥裁剪 CS)
-		inline static VkPipeline _compute_pipeline = VK_NULL_HANDLE;
-		// ObjectID 拾取计算管线
-		inline static VkPipeline _object_id_compute_pipeline = VK_NULL_HANDLE;
-		// main (测试 quad)
-		inline static VkPipeline _main_opaque_pipeline = VK_NULL_HANDLE;
-
-		inline static std::array<VkPipeline, static_cast<size_t>(IRendererPipelineType::PipelineCount)> _pipelines{};
+		// 管线管理相关
+		inline static std::array<VkPipeline, static_cast<size_t>(IRendererPipelineType::PipelineCount)> _pipelines{ VK_NULL_HANDLE };
 		inline static std::vector<std::pair<IRendererPipelineType, VkPipeline>> _pipelines_updates;
 		inline static std::mutex _pipelines_updates_mutex;
+		inline static std::uint32_t _is_main_renderer_ready{ 0 };
+		inline static std::uint32_t _is_post_processing_renderer_ready{ 0 };
 
 		inline static std::vector<VkFence> _frame_fences;
 		inline static std::vector<VkSemaphore> _acquire_semaphores;	// 每帧槽
@@ -125,10 +130,19 @@ namespace INVENT
 		inline static std::vector<VkCommandBuffer> _command_buffers;
 
 		inline static std::vector<ScenceRT> _mainRTs; // 主场景进行离屏渲染
-		inline static std::vector<ScenceObjectIDRT> _object_id_RTs; // 场景 U32 ObjectID 渲染目标
+		// 主场景离屏颜色在 bindless 中的槽位 (每帧一个; 后处理通过它采样主场景颜色)
+		inline static std::vector<std::uint32_t> _mainRT_bindless_slots;
+		inline static std::vector<ScenceObjectIDRT> _object_id_RTs; // 主场景 U32 ObjectID 渲染目标
 		inline static ScenceObjectIDRT _main_depth_RT;		// 主场景进行离屏渲染使用的深度附件
 		inline static VkFormat _mainRT_format = VK_FORMAT_UNDEFINED; // 主渲染作为离屏渲染时所用的 format （编辑器与渲染后期处理时会使用）
-		inline static VkExtent2D _mainRT_extent{ 0,0 }; // 离屏渲染大小
+		inline static VkExtent2D _mainRT_extent{ 0,0 }; // 主场景离屏渲染大小
+
+		inline static VkExtent2D _otherRT_extent{ 0,0 }; // 其他场景（用作纹理的场景）离屏渲染大小
+
+		// 后处理离屏渲染（使用 imgui 时）: 大小 / 格式与 _mainRTs 完全一致
+		//   _use_imgui      : 后处理结果 -> postProcessingRTs -> imgui 采样显示
+		//   !_use_imgui     : 后处理结果 -> 交换链图像 (直接上屏)
+		inline static std::vector<ScenceRT> postProcessingRTs;
 
 		// set0: 每帧一份 (一个 set 包含 binding 0~4 全部)
 		inline static std::vector<VkDescriptorSet> _set0;

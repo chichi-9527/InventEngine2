@@ -1,4 +1,4 @@
-﻿#include "IVulkan/IVulkanRenderer.h"
+#include "IVulkan/IVulkanRenderer.h"
 
 #include "IVulkan/VulkanConfig.h"
 #include "IVulkan/VulkanBase.h"
@@ -70,6 +70,10 @@ namespace INVENT
 	constexpr const char* MainMeshFSPath = "Config/Shaders/SPV/MainMesh.frag.spv";
 	constexpr const char* GeneralCSPath = "Config/Shaders/SPV/GeneralCompute.comp.spv";
 	constexpr const char* ObjectIDGetCSPath = "Config/Shaders/SPV/ObjectIDGet.comp.spv";
+
+	// 后处理 (默认什么都不做: 主场景离屏颜色原样输出)
+	constexpr const char* PostProcessingVSPath = "Config/Shaders/SPV/PostProcessing.vert.spv";
+	constexpr const char* PostProcessingFSPath = "Config/Shaders/SPV/PostProcessing.frag.spv";
 
 	static IVulkan::PushConstants pushConstants{};
 
@@ -395,6 +399,17 @@ namespace INVENT
 			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(image)] = init;
 		}
 
+		// 交换链深度图 (直接渲染到交换链时使用) 也要登记, aspect 必须是 DEPTH
+		VkImageBarrierCache depthInit{};
+		depthInit.imageAspectFlags = VK_IMAGE_ASPECT_DEPTH_BIT;
+		depthInit.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		depthInit.currentStageMask = VK_PIPELINE_STAGE_2_NONE;
+		depthInit.currentAccessMask = 0;
+		if (base.GetDepthImage() != VK_NULL_HANDLE)
+		{
+			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(base.GetDepthImage())] = depthInit;
+		}
+
 		return true;
 	}
 
@@ -409,8 +424,9 @@ namespace INVENT
 		ColorImageInit.currentAccessMask = 0;
 
 		VkImageUsageFlags rtUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-		for (auto& rt : _mainRTs)
+		for (std::size_t i = 0; i < _mainRTs.size(); ++i)
 		{
+			auto& rt = _mainRTs[i];
 			if (rt.imageView != VK_NULL_HANDLE || rt.image != VK_NULL_HANDLE)
 			{
 				FrameRTDestroyRing[_destroy_cursor].push_back({ rt.image, rt.imageView });
@@ -435,6 +451,45 @@ namespace INVENT
 			if (rt.imageView == VK_NULL_HANDLE)
 			{
 				INVENT_LOG_ERROR("[IVulkanRenderer] main rt image view create error! result: {}.");
+				return false;
+			}
+
+			(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(rt.image)] = ColorImageInit;
+
+			// 重新绑定 bindless 槽位 (槽位不变, 只是 view 换了; 后处理通过它采样主场景颜色)
+			if (i < _mainRT_bindless_slots.size())
+			{
+				IVulkanTexture2DManagement::Instance().UpdateTexture2D({ _mainRT_bindless_slots[i] }, rt.imageView);
+			}
+		}
+
+		// 后处理离屏 RT: 与主场景离屏 RT 同大小 / 同格式
+		for (auto& rt : postProcessingRTs)
+		{
+			if (rt.imageView != VK_NULL_HANDLE || rt.image != VK_NULL_HANDLE)
+			{
+				FrameRTDestroyRing[_destroy_cursor].push_back({ rt.image, rt.imageView });
+			}
+
+			if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
+				1,
+				_mainRT_format,
+				VK_IMAGE_TILING_OPTIMAL,
+				rtUsage,
+				0,
+				rt.image))
+			{
+				INVENT_LOG_ERROR(std::format("[IVulkanRenderer] post processing rt image create error! result: {}.", static_cast<int>(res)));
+				return false;
+			}
+
+			rt.imageView = base.CreateImageView(
+				rt.image,
+				_mainRT_format,
+				VK_IMAGE_ASPECT_COLOR_BIT);
+			if (rt.imageView == VK_NULL_HANDLE)
+			{
+				INVENT_LOG_ERROR("[IVulkanRenderer] post processing rt image view create error!");
 				return false;
 			}
 
@@ -550,6 +605,33 @@ namespace INVENT
 				currentP = pipeline;
 			}
 		}
+
+		// judge main renderer ready
+		IRendererPipelineType mainNeed[] = { 
+			IRendererPipelineType::PipelineComputeGeneral,
+			IRendererPipelineType::PipelineComputeReturnObjectID
+		};
+		if (_is_pipeline_ok(IRendererPipelineType::PipelineMainOpaque,
+			mainNeed,
+			sizeof(mainNeed) / sizeof(IRendererPipelineType)))
+		{
+			_is_main_renderer_ready = 1;
+
+			// judge post processing ready
+			if (_is_pipeline_ok(IRendererPipelineType::PipelinePostProcessing, nullptr, 0))
+			{
+				_is_post_processing_renderer_ready = 1;
+			}
+			else
+			{
+				_is_post_processing_renderer_ready = 0;
+			}
+		}
+		else
+		{
+			_is_main_renderer_ready = 0;
+		}
+
 	}
 
 	bool IVulkanRenderer::_flush_destroy_queue()
@@ -617,13 +699,22 @@ namespace INVENT
 
 		// 图形管线
 		// main
+		if (_mainRT_format != base.GetSwapChainImageFormat())
+		{
+			INVENT_LOG_WARNING(std::format("[IVulkanRenderer] 主场景离屏格式 ({}) 与交换链格式 ({}) 不一致, 同一图形管线同时用于离屏与直接上屏可能触发校验错误.",
+				static_cast<std::uint32_t>(_mainRT_format),
+				static_cast<std::uint32_t>(base.GetSwapChainImageFormat())));
+		}
 		_mainRTs.resize(static_cast<size_t>(IVulkan::MAX_FRAMES_IN_FLIGHT));
+		_mainRT_bindless_slots.resize(static_cast<size_t>(IVulkan::MAX_FRAMES_IN_FLIGHT), UINT32_MAX);
 		_object_id_RTs.resize(static_cast<size_t>(IVulkan::MAX_FRAMES_IN_FLIGHT));
+		postProcessingRTs.resize(static_cast<size_t>(IVulkan::MAX_FRAMES_IN_FLIGHT));
 		if (_mainRT_extent.width != 0 && _mainRT_extent.height != 0)
 		{
 			VkImageUsageFlags rtUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-			for (auto& rt : _mainRTs)
+			for (std::size_t i = 0; i < _mainRTs.size(); ++i)
 			{
+				auto& rt = _mainRTs[i];
 				if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
 					1,
 					_mainRT_format,
@@ -643,6 +734,38 @@ namespace INVENT
 				if (rt.imageView == VK_NULL_HANDLE)
 				{
 					INVENT_LOG_ERROR("[IVulkanRenderer] main rt image view create error! result: {}.");
+					return false;
+				}
+
+				(*_image_barrier_cache_map)[reinterpret_cast<std::uint64_t>(rt.image)] = ColorImageInit;
+
+				// 注册到 bindless (外部渲染目标槽位): 后处理通过该槽位采样主场景离屏颜色
+				_mainRT_bindless_slots[i] = IVulkanTexture2DManagement::Instance().AllocateTextureHandle().slot;
+				IVulkanTexture2DManagement::Instance().UpdateTexture2D({ _mainRT_bindless_slots[i] }, rt.imageView);
+			}
+
+			// 后处理离屏 RT: 与主场景离屏 RT 同大小 / 同格式 (使用 imgui 时后处理结果写到这里供 imgui 采样)
+			for (auto& rt : postProcessingRTs)
+			{
+				if (VkResult res = base.UseVmaCreateImage(_mainRT_extent.width, _mainRT_extent.height,
+					1,
+					_mainRT_format,
+					VK_IMAGE_TILING_OPTIMAL,
+					rtUsage,
+					0,
+					rt.image))
+				{
+					INVENT_LOG_ERROR(std::format("[IVulkanRenderer] post processing rt image create error! result: {}.", static_cast<int>(res)));
+					return false;
+				}
+
+				rt.imageView = base.CreateImageView(
+					rt.image,
+					_mainRT_format,
+					VK_IMAGE_ASPECT_COLOR_BIT);
+				if (rt.imageView == VK_NULL_HANDLE)
+				{
+					INVENT_LOG_ERROR("[IVulkanRenderer] post processing rt image view create error!");
 					return false;
 				}
 
@@ -731,12 +854,14 @@ namespace INVENT
 		cfg.DepthAttachmentFormat = base.GetDepthFormat();
 		cfg.EnableDepthTest = VK_TRUE;
 		cfg.CullMode = VK_CULL_MODE_NONE;
-		_main_opaque_pipeline = base.CreateGraphicsPipeline(cfg);
-		if (_main_opaque_pipeline == VK_NULL_HANDLE) return false;
+		auto mainOpaquePipeline = base.CreateGraphicsPipeline(cfg);
+		if (mainOpaquePipeline == VK_NULL_HANDLE) return false;
+		UpdatePipeline(IRendererPipelineType::PipelineMainOpaque, mainOpaquePipeline);
 
 		// 反馈计算管线 (全局 layout: set0)
-		_compute_pipeline = base.CreateComputePipeline(cs);
-		if (_compute_pipeline == VK_NULL_HANDLE) return false;
+		auto computeGeneralPipeline = base.CreateComputePipeline(cs);
+		if (computeGeneralPipeline == VK_NULL_HANDLE) return false;
+		UpdatePipeline(IRendererPipelineType::PipelineComputeGeneral, computeGeneralPipeline);
 
 		// ObjectID 拾取计算管线
 		{
@@ -746,9 +871,47 @@ namespace INVENT
 				INVENT_LOG_FATAL("[IVulkanRenderer] ObjectID 计算着色器加载失败!");
 				return false;
 			}
-			_object_id_compute_pipeline = base.CreateComputePipeline(csObj);
+			auto ObjectIDComputePipeline = base.CreateComputePipeline(csObj);
 			base.DestroyShaderMoudle(csObj);
-			if (_object_id_compute_pipeline == VK_NULL_HANDLE) return false;
+			if (ObjectIDComputePipeline == VK_NULL_HANDLE) return false;
+			UpdatePipeline(IRendererPipelineType::PipelineComputeReturnObjectID, ObjectIDComputePipeline);
+		}
+
+		// post process 后期处理管线
+		{
+			auto postVS = base.CreateShaderMoudle(PostProcessingVSPath);
+			auto postFS = base.CreateShaderMoudle(PostProcessingFSPath);
+			if (postVS == VK_NULL_HANDLE || postFS == VK_NULL_HANDLE)
+			{
+				// 后处理 shader 还没编译: 不阻塞启动, 主场景会按 "无后处理" 的路径渲染
+				INVENT_LOG_WARNING(std::format("[IVulkanRenderer] 后处理 shader 加载失败 ({} / {}), 后处理管线关闭.",
+					PostProcessingVSPath, PostProcessingFSPath));
+			}
+			else
+			{
+				IVulkanBase::GraphicsPipelineConfig postCfg{};
+				postCfg.VertexShader = postVS;
+				postCfg.FragmentShader = postFS;
+				// 后处理输出格式与主场景离屏 RT 一致 (写入交换链时也要求格式一致)
+				postCfg.ColorAttachmentFormat = _mainRT_format;
+				postCfg.SecondColorAttachmentFormat = VK_FORMAT_UNDEFINED;
+				postCfg.DepthAttachmentFormat = VK_FORMAT_UNDEFINED;
+				postCfg.EnableDepthTest = VK_FALSE;		// 后处理不需要深度
+				postCfg.CullMode = VK_CULL_MODE_NONE;	// 全屏三角形不做剔除
+				postCfg.BlendMode = IVulkanBase::ModelBlendMode::Opaque;
+
+				auto postPipeline = base.CreateGraphicsPipeline(postCfg);
+				if (postPipeline == VK_NULL_HANDLE)
+				{
+					INVENT_LOG_WARNING("[IVulkanRenderer] 后处理图形管线创建失败, 后处理管线关闭.");
+				}
+				else
+				{
+					UpdatePipeline(IRendererPipelineType::PipelinePostProcessing, postPipeline);
+				}
+			}
+			if (postVS != VK_NULL_HANDLE) base.DestroyShaderMoudle(postVS);
+			if (postFS != VK_NULL_HANDLE) base.DestroyShaderMoudle(postFS);
 		}
 
 		base.DestroyShaderMoudle(vs);
@@ -926,42 +1089,35 @@ namespace INVENT
 		VkCommandBuffer cmd = _command_buffers[frameindex];
 		VkImage swapImage = base.GetSwapChainImages()[_image_index];
 
+		// ===== 主场景渲染目标选择 =====
+		//   _use_imgui (编辑器)                 -> 离屏: 场景写 _mainRTs, 之后由 imgui 采样显示
+		//   _is_post_processing_renderer_ready  -> 离屏: 场景写 _mainRTs, 之后由后处理采样
+		//   两者都不成立                        -> 直接渲染到交换链图像 (省掉一次全屏拷贝)
+		const bool scene_offscreen = (_use_imgui || _is_post_processing_renderer_ready != 0);
+		const VkExtent2D scene_extent = scene_offscreen ? _mainRT_extent : base.GetSwapChainExtent();
+		const VkImage scene_color_image = scene_offscreen ? _mainRTs[frameindex].image : swapImage;
+		const VkImageView scene_color_view = scene_offscreen ? _mainRTs[frameindex].imageView : base.GetSwapChainImageViews()[_image_index];
+		// 深度统一使用离屏深度 RT: 拾取 CS 通过 bindless slot 采样它,
+		// 非 imgui 模式下 _mainRT_extent 会随交换链尺寸同步, 因此与交换链颜色附件尺寸一致
+		const VkImage scene_depth_image = _main_depth_RT.sRT.image;
+		const VkImageView scene_depth_view = _main_depth_RT.sRT.imageView;
+
 		// 1) 新上传窗口 image 的所有权获取 (transfer -> graphics), 必须在所有采样之前
 		texMgmt.RecordAcquireBarriers(cmd);
 
-		// 2) 交换链: UNDEFINED -> COLOR_ATTACHMENT (srcStage 与提交时的 acquire 等待阶段对齐)
-		if (_use_imgui)
-		{
-			_record_image_barrier_auto(cmd, _mainRTs[frameindex].image,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-		}
-		else
-		{
-			_record_image_barrier_auto(cmd, swapImage,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-				VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-		}
+		// 2) 主场景颜色目标: UNDEFINED -> COLOR_ATTACHMENT (srcStage 与提交时的 acquire 等待阶段对齐)
+		_record_image_barrier_auto(cmd, scene_color_image,
+			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
-		// 深度缓冲: UNDEFINED -> DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-		if (_use_imgui)
-		{
-			_record_image_barrier_auto(cmd, _main_depth_RT.sRT.image,
-				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-				VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-				VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-		}
-		else
-		{
-			_record_image_barrier_auto(cmd, base.GetDepthImage(),
-				VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-				VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-				VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-		}
+		// 3) 主场景深度: UNDEFINED -> DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+		_record_image_barrier_auto(cmd, scene_depth_image,
+			VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+			VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+			VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
-		// U32 ObjectID RT: SHADER -> COLOR_ATTACHMENT_OPTIMAL
+		// 4) U32 ObjectID RT: SHADER -> COLOR_ATTACHMENT_OPTIMAL
 		_record_image_barrier_auto(cmd, _object_id_RTs[frameindex].sRT.image,
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -972,7 +1128,7 @@ namespace INVENT
 		// 实例刷新
 		InstanceBuffer::FlushBuffer();
 
-		// 3) mip 反馈 CS
+		// 5) mip 反馈 CS
 		vkCmdFillBuffer(cmd, _draw_count_and_indirect_buffers[frameindex].buffer,
 			0, 
 			sizeof(uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT,
@@ -980,7 +1136,8 @@ namespace INVENT
 		texMgmt.ResetMipFeedback(cmd, frameindex);		// fill 0xFF + transfer->compute 屏障
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
 			base.GetVkPipelineLayout(), 0, 1, &_set0[frameindex], 0, nullptr);
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _compute_pipeline);
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+			_pipelines[IRendererPipelineType::PipelineComputeGeneral]);
 		// 传入 Push Constants
 		pushConstants.BatchID = 0;
 		pushConstants.DrawObjectIndexOffset = 0;
@@ -1012,118 +1169,197 @@ namespace INVENT
 			vkCmdPipelineBarrier2(cmd, &di);
 		}
 
-		// 4) quad 绘制 (动态渲染)
-		VkDescriptorSet sets[2] = { _set0[frameindex], base.GetGlobalBindlessDescriptorSet() };
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _main_opaque_pipeline);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
-
-		VkExtent2D extent{};
-		if (_use_imgui)
+		// 6) 主场景渲染
+		//    - 离屏: 渲染到 _mainRTs[frameindex] (imgui 或 后处理需要)
+		//    - 直接: 渲染到交换链图像
+		if (_is_main_renderer_ready != 0)
 		{
-			extent = _mainRT_extent;
-		}
-		else
-		{
-			extent = base.GetSwapChainExtent();
-		}
+			VkDescriptorSet sets[2] = { _set0[frameindex], base.GetGlobalBindlessDescriptorSet() };
 
-		VkViewport viewport{};
-		viewport.width = static_cast<float>(extent.width);
-		viewport.height = static_cast<float>(extent.height);
-		viewport.maxDepth = 1.0f;
-		VkRect2D scissor{ {0, 0}, extent };
-		vkCmdSetViewport(cmd, 0, 1, &viewport);
-		vkCmdSetScissor(cmd, 0, 1, &scissor);
+			// ---- 6.1 主场景几何 pass (动态渲染) ----
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				_pipelines[IRendererPipelineType::PipelineMainOpaque]);
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
 
-		VkRenderingAttachmentInfo color{};
-		color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-		if (_use_imgui)
-		{
-			color.imageView = _mainRTs[frameindex].imageView;
-		}
-		else
-		{
-			color.imageView = base.GetSwapChainImageViews()[_image_index];
-		}
-		
-		color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		color.clearValue = _vk_clear;
+			VkViewport viewport{};
+			viewport.width = static_cast<float>(scene_extent.width);
+			viewport.height = static_cast<float>(scene_extent.height);
+			viewport.maxDepth = 1.0f;
+			VkRect2D scissor{ {0, 0}, scene_extent };
+			vkCmdSetViewport(cmd, 0, 1, &viewport);
+			vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-		VkRenderingAttachmentInfo depth{};
-		depth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-		if (_use_imgui)
-		{
-			depth.imageView = _main_depth_RT.sRT.imageView;
-		}
-		else
-		{
-			depth.imageView = base.GetDepthImageView();
-		}
-		
-		depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-		depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // 清除深度缓冲区
-		depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;	  // 深度需保留供后续 CS 采样
-		depth.clearValue.depthStencil = { 1.0f, 0 };	  // 默认深度设为 1.0
+			VkRenderingAttachmentInfo color{};
+			color.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+			color.imageView = scene_color_view;
+			color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			color.clearValue = _vk_clear;
 
-		// U32 ObjectID 第二颜色附件
-		VkRenderingAttachmentInfo objectIDAttachment{};
-		objectIDAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-		objectIDAttachment.imageView = _object_id_RTs[frameindex].sRT.imageView;
-		objectIDAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-		objectIDAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		objectIDAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		objectIDAttachment.clearValue.color.uint32[0] = 0;
+			VkRenderingAttachmentInfo depth{};
+			depth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+			depth.imageView = scene_depth_view;
+			depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // 清除深度缓冲区
+			depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;	  // 深度需保留供后续 CS 采样
+			depth.clearValue.depthStencil = { 1.0f, 0 };	  // 默认深度设为 1.0
 
-		VkRenderingAttachmentInfo colorAttachments[2] = { color, objectIDAttachment };
+			// U32 ObjectID 第二颜色附件
+			VkRenderingAttachmentInfo objectIDAttachment{};
+			objectIDAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+			objectIDAttachment.imageView = _object_id_RTs[frameindex].sRT.imageView;
+			objectIDAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			objectIDAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			objectIDAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			objectIDAttachment.clearValue.color.uint32[0] = 0;
 
-		VkRenderingInfo ri{};
-		ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-		ri.renderArea = { {0, 0}, extent };
-		ri.layerCount = 1;
-		ri.colorAttachmentCount = 2;
-		ri.pColorAttachments = colorAttachments;
-		ri.pDepthAttachment = &depth;
+			VkRenderingAttachmentInfo colorAttachments[2] = { color, objectIDAttachment };
 
-		vkCmdBeginRendering(cmd, &ri);
-		
-		vkCmdDrawIndirectCount(cmd,
-			_draw_count_and_indirect_buffers[frameindex].buffer, sizeof(uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT,
-			_draw_count_and_indirect_buffers[frameindex].buffer, 0,
-			IVulkan::EXPECTED_INSTANCE_SIZE,
-			sizeof(VkDrawIndirectCommand));
-		vkCmdEndRendering(cmd);
+			VkRenderingInfo ri{};
+			ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+			ri.renderArea = { {0, 0}, scene_extent };
+			ri.layerCount = 1;
+			ri.colorAttachmentCount = 2;
+			ri.pColorAttachments = colorAttachments;
+			ri.pDepthAttachment = &depth;
 
-		// U32 ObjectID RT: COLOR_ATTACHMENT -> SHADER_READ_ONLY (供 CS 通过 bindless 读取)
-		_record_image_barrier_auto(cmd, _object_id_RTs[frameindex].sRT.image,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			VK_ACCESS_2_SHADER_READ_BIT);
+			vkCmdBeginRendering(cmd, &ri);
 
-		// 深度 RT: DEPTH_STENCIL_ATTACHMENT -> SHADER_READ_ONLY (供 CS 通过 bindless 读取)
-		_record_image_barrier_auto(cmd, _main_depth_RT.sRT.image,
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-			VK_ACCESS_2_SHADER_READ_BIT);
+			vkCmdDrawIndirectCount(cmd,
+				_draw_count_and_indirect_buffers[frameindex].buffer, sizeof(uint32_t) * IVulkan::MAX_INSTANCE_BATCH_COUNT,
+				_draw_count_and_indirect_buffers[frameindex].buffer, 0,
+				IVulkan::EXPECTED_INSTANCE_SIZE,
+				sizeof(VkDrawIndirectCommand));
+			vkCmdEndRendering(cmd);
 
-		// ObjectID 拾取计算着色器
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _object_id_compute_pipeline);
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-			base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
-		vkCmdDispatch(cmd, 1, 1, 1);
+			// 离屏颜色: COLOR_ATTACHMENT -> SHADER_READ_ONLY (后处理采样)
+			if (scene_offscreen && _is_post_processing_renderer_ready != 0)
+			{
+				_record_image_barrier_auto(cmd, _mainRTs[frameindex].image,
+					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					VK_ACCESS_2_SHADER_READ_BIT);
+			}
 
-		// draw imgui
-		if (_use_imgui)
-		{
-			// 離屏顏色 RT 屏障：COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
-			_record_image_barrier_auto(cmd, _mainRTs[frameindex].image,
+			// U32 ObjectID RT: COLOR_ATTACHMENT -> SHADER_READ_ONLY (供 CS 通过 bindless 读取)
+			_record_image_barrier_auto(cmd, _object_id_RTs[frameindex].sRT.image,
 				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-				VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+				VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
 				VK_ACCESS_2_SHADER_READ_BIT);
 
-			// 交換鏈: UNDEFINED -> COLOR_ATTACHMENT (與 acquire 等待階段對齊)
+			// 深度 RT: DEPTH_STENCIL_ATTACHMENT -> SHADER_READ_ONLY (供 CS 通过 bindless 读取)
+			_record_image_barrier_auto(cmd, scene_depth_image,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+				VK_ACCESS_2_SHADER_READ_BIT);
+
+			// ---- 6.2 ObjectID 拾取计算着色器 (必须在本帧几何之后, 采样本帧的 objectID / 深度) ----
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+				_pipelines[IRendererPipelineType::PipelineComputeReturnObjectID]);
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+				base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
+			vkCmdDispatch(cmd, 1, 1, 1);
+
+			// ---- 6.3 后处理 ----
+			if (_is_post_processing_renderer_ready != 0)
+			{
+				// 后处理输出目标:
+				//   使用 imgui (编辑器) -> postProcessingRTs[frameindex] (离屏, 供 imgui 采样)
+				//   不使用 imgui       -> 交换链图像 (直接上屏)
+				const bool post_offscreen = _use_imgui;
+				const VkExtent2D post_extent = post_offscreen ? _mainRT_extent : base.GetSwapChainExtent();
+				const VkImage post_color_image = post_offscreen ? postProcessingRTs[frameindex].image : swapImage;
+				const VkImageView post_color_view = post_offscreen ? postProcessingRTs[frameindex].imageView : base.GetSwapChainImageViews()[_image_index];
+
+				// 后处理输出: -> COLOR_ATTACHMENT_OPTIMAL
+				_record_image_barrier_auto(cmd, post_color_image,
+					VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+					VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+					VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+
+				vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+					_pipelines[IRendererPipelineType::PipelinePostProcessing]);
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+					base.GetVkPipelineLayout(), 0, 2, sets, 0, nullptr);
+
+				// 源纹理 = 主场景离屏颜色, 以 bindless slot 形式传入
+				// (后处理 pass 无 "本次绘制对象索引" 语义, 复用 PushConstants.DrawObjectIndex 传递源纹理槽位)
+				IVulkan::PushConstants postPushConstants{};
+				postPushConstants.DrawObjectIndexOffset = _mainRT_bindless_slots[frameindex];
+				postPushConstants.LevelID = 0xFFFF;
+				postPushConstants.BatchID = 0;
+				vkCmdPushConstants(cmd,
+					base.GetVkPipelineLayout(),
+					base.GetPushConstantStageFlags(),
+					0,
+					sizeof(IVulkan::PushConstants),
+					&postPushConstants);
+
+				VkViewport postViewport{};
+				postViewport.width = static_cast<float>(post_extent.width);
+				postViewport.height = static_cast<float>(post_extent.height);
+				postViewport.maxDepth = 1.0f;
+				VkRect2D postScissor{ {0, 0}, post_extent };
+				vkCmdSetViewport(cmd, 0, 1, &postViewport);
+				vkCmdSetScissor(cmd, 0, 1, &postScissor);
+
+				VkRenderingAttachmentInfo postColor{};
+				postColor.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+				postColor.imageView = post_color_view;
+				postColor.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				postColor.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;		// 全屏 pass, 像素被完全覆盖
+				postColor.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+				postColor.clearValue = _vk_clear;
+
+				VkRenderingInfo postRenderingInfo{};
+				postRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+				postRenderingInfo.renderArea = { {0, 0}, post_extent };
+				postRenderingInfo.layerCount = 1;
+				postRenderingInfo.colorAttachmentCount = 1;
+				postRenderingInfo.pColorAttachments = &postColor;
+				postRenderingInfo.pDepthAttachment = nullptr;		// 后处理不需要深度
+
+				vkCmdBeginRendering(cmd, &postRenderingInfo);
+				vkCmdDraw(cmd, 3, 1, 0, 0);		// 全屏大三角形 (无顶点缓冲)
+				vkCmdEndRendering(cmd);
+
+				// 后处理离屏结果: COLOR_ATTACHMENT -> SHADER_READ_ONLY (供 imgui 采样)
+				if (post_offscreen)
+				{
+					_record_image_barrier_auto(cmd, postProcessingRTs[frameindex].image,
+						VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+						VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+						VK_ACCESS_2_SHADER_READ_BIT);
+				}
+			}
+		}
+
+		// 7) draw imgui (编辑器)
+		if (_use_imgui)
+		{
+			// imgui 要采样的最终场景图像:
+			//   后处理已执行 -> postProcessingRTs[frameindex] (后处理结果)
+			//   否则         -> _mainRTs[frameindex] (主场景离屏颜色)
+			const bool scene_post_rendered =
+				(_is_main_renderer_ready != 0 && _is_post_processing_renderer_ready != 0);
+			const VkImageView scene_display_view = scene_post_rendered ?
+				postProcessingRTs[frameindex].imageView :
+				_mainRTs[frameindex].imageView;
+
+			// 離屏顏色 RT 屏障：COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+			// (后处理前的屏障已录好; 这里处理 imgui 直接采样主场景 RT 的情况,
+			//  主场景 pass 因管线未就绪而没执行时也需要转换 layout 才能被采样)
+			if (!scene_post_rendered)
+			{
+				_record_image_barrier_auto(cmd, _mainRTs[frameindex].image,
+					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+					VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+					VK_ACCESS_2_SHADER_READ_BIT);
+			}
+
+			// 交換鏈: -> COLOR_ATTACHMENT (與 acquire 等待階段對齊)
 			_record_image_barrier_auto(cmd, swapImage,
 				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1132,7 +1368,7 @@ namespace INVENT
 			// 使用离屏渲染场景时不需要了
 			// _imgui_barrier(cmd, swapImage);
 
-			_imgui_frame_data = _imgui_end_frame_and_fetch_func(frameindex, _mainRTs[frameindex].imageView, _global_sampler);
+			_imgui_frame_data = _imgui_end_frame_and_fetch_func(frameindex, scene_display_view, _global_sampler);
 
 			VkRenderingAttachmentInfo uiColor{};
 			uiColor.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -1159,7 +1395,7 @@ namespace INVENT
 			vkCmdEndRendering(cmd);
 		}
 
-		// 5) COLOR_ATTACHMENT -> PRESENT_SRC
+		// 8) COLOR_ATTACHMENT -> PRESENT_SRC
 		_record_image_barrier_auto(cmd, swapImage,
 			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 			VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
@@ -1288,9 +1524,11 @@ namespace INVENT
 			vkDeviceWaitIdle(device);
 		}
 
-		if (_main_opaque_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _main_opaque_pipeline, nullptr); _main_opaque_pipeline = VK_NULL_HANDLE; }
-		if (_object_id_compute_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _object_id_compute_pipeline, nullptr); _object_id_compute_pipeline = VK_NULL_HANDLE; }
-		if (_compute_pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(device, _compute_pipeline, nullptr); _compute_pipeline = VK_NULL_HANDLE; }
+		for (auto& pipeline : _pipelines)
+		{
+			if (pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, pipeline, nullptr);
+			pipeline = VK_NULL_HANDLE;
+		}
 		if (_global_sampler != VK_NULL_HANDLE) { vkDestroySampler(device, _global_sampler, nullptr); _global_sampler = VK_NULL_HANDLE; }
 
 		for (auto& rt : _mainRTs)
@@ -1305,6 +1543,24 @@ namespace INVENT
 			}
 		}
 		_mainRTs.clear();
+		for (auto slot : _mainRT_bindless_slots)
+		{
+			if (slot != UINT32_MAX)
+				IVulkanTexture2DManagement::Instance().DestroyTexture2D({ slot });
+		}
+		_mainRT_bindless_slots.clear();
+		for (auto& rt : postProcessingRTs)
+		{
+			if (rt.imageView != VK_NULL_HANDLE)
+			{
+				base.DestroyImageView(rt.imageView);
+			}
+			if (rt.image != VK_NULL_HANDLE)
+			{
+				base.UseVmaDestroyImage(rt.image);
+			}
+		}
+		postProcessingRTs.clear();
 		for (auto& rt : _object_id_RTs)
 		{
 			IVulkanTexture2DManagement::Instance().DestroyTexture2D({ rt.bindlessSlot });
